@@ -2375,7 +2375,7 @@ void HTMLParser::handle_text(HTMLToken& token)
             if (script_nesting_level() != 0) {
                 // Set the parser pause flag to true,
                 m_parser_pause_flag = true;
-                // FIXME: and abort the processing of any nested invocations of the tokenizer, yielding control back to the caller.
+                //  and abort the processing of any nested invocations of the tokenizer, yielding control back to the caller.
                 //        (Tokenization will resume when the caller returns to the "outer" tree construction stage.)
                 TODO();
             }
