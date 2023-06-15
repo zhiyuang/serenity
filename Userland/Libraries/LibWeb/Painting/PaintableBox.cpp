@@ -512,6 +512,9 @@ static void paint_text_decoration(PaintContext& context, Gfx::Painter& painter, 
 
 static void paint_text_fragment(PaintContext& context, Layout::TextNode const& text_node, Layout::LineBoxFragment const& fragment, PaintPhase phase)
 {
+    if (!text_node.is_visible())
+        return;
+
     auto& painter = context.painter();
 
     if (phase == PaintPhase::Foreground) {
@@ -552,7 +555,7 @@ void PaintableWithLines::paint(PaintContext& context, PaintPhase phase) const
 
     if (m_line_boxes.is_empty())
         return;
-
+    dbgln("paint line boxs: {}", m_line_boxes.size());
     bool should_clip_overflow = computed_values().overflow_x() != CSS::Overflow::Visible && computed_values().overflow_y() != CSS::Overflow::Visible;
     Optional<BorderRadiusCornerClipper> corner_clipper;
 
@@ -673,8 +676,8 @@ void PaintableBox::set_stacking_context(NonnullOwnPtr<StackingContext> stacking_
 
 Optional<HitTestResult> PaintableBox::hit_test(CSSPixelPoint position, HitTestType type) const
 {
-    if (!is_visible())
-        return {};
+    // if (!is_visible())
+    //     return {};
 
     if (layout_box().is_viewport()) {
         const_cast<Layout::Viewport&>(static_cast<Layout::Viewport const&>(layout_box())).build_stacking_context_tree_if_needed();
