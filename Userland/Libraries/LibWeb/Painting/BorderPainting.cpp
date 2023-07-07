@@ -161,7 +161,7 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
                 points[current++],
                 // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
                 // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
-                Gfx::FloatSize(radius.horizontal_radius - 10, radius.vertical_radius - 10),
+                Gfx::FloatSize(radius.horizontal_radius - device_pixel_width.value(), radius.vertical_radius - device_pixel_width.value()),
                 AK::Pi<double>,
                 // 0.01,
                 // 0.01,
@@ -174,7 +174,7 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
                 points[current++],
                 // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
                 // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
-                Gfx::FloatSize(radius.horizontal_radius - 10, radius.vertical_radius - 10),
+                Gfx::FloatSize(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - device_pixel_width.value()),
                 0,
                 // 0.01,
                 // 0.01,
@@ -196,6 +196,12 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         aa_painter.fill_path(path, color, Gfx::Painter::WindingRule::EvenOdd);
     };
 
+    auto compute_midpoint = [](int horizontal_radius, int vertical_radius) {
+        // compute the midpoint based on point whose tangent slope of 1
+        // https://math.stackexchange.com/questions/3325134/find-the-points-on-the-ellipse-where-the-slope-of-the-tangent-line-is-1
+        return Gfx::FloatPoint((horizontal_radius * horizontal_radius) / AK::sqrt(1.0f * horizontal_radius * horizontal_radius + vertical_radius * vertical_radius), (vertical_radius * vertical_radius) / AK::sqrt(1.0f * horizontal_radius * horizontal_radius + vertical_radius * vertical_radius));
+    };
+
     switch (edge) {
     case BorderEdge::Top: {
         Gfx::FloatPoint corner_offset_1;
@@ -203,7 +209,8 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         if (borders_data.left.width == 0) {
             corner_offset_1 = Gfx::FloatPoint(-radius.horizontal_radius, radius.vertical_radius);
         } else {
-            corner_offset_1 = Gfx::FloatPoint(-radius.horizontal_radius * AK::sin<float>(AK::Pi<float> * 0.25), radius.vertical_radius * (1 - AK::cos(AK::Pi<float> * 0.25)));
+            auto midpoint = compute_midpoint(radius.horizontal_radius, radius.vertical_radius);
+            corner_offset_1 = Gfx::FloatPoint(-midpoint.x(), radius.vertical_radius - midpoint.y());
         }
 
         if (borders_data.right.width == 0) {
@@ -221,8 +228,9 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         bool right = false;
         if (device_pixel_width.value() < radius.vertical_radius) {
             left = true;
-            dbgln("width is {}, radius is {}", context.enclosing_device_pixels(borders_data.top.width).value(), radius.vertical_radius);
-            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-(radius.horizontal_radius - context.enclosing_device_pixels(borders_data.top.width).value()) * AK::sin<float>(AK::Pi<float> * 0.25), (radius.vertical_radius - context.enclosing_device_pixels(borders_data.top.width).value()) * (1 - AK::cos(AK::Pi<float> * 0.25)));
+            auto midpoint = compute_midpoint(radius.horizontal_radius - context.enclosing_device_pixels(borders_data.left.width).value(), radius.vertical_radius - device_pixel_width.value());
+            // dbgln("width is {}, radius is {}", context.enclosing_device_pixels(borders_data.top.width).value(), radius.vertical_radius);
+            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-midpoint.x(), radius.vertical_radius - device_pixel_width.value() - midpoint.y());
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_corner);
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
         } else {
@@ -278,7 +286,7 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
 
         if (device_pixel_width < opposite_radius.horizontal_radius) {
             right = true;
-            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-(radius.horizontal_radius - device_pixel_width.value()) * (1 - AK::cos(AK::Pi<float> * 0.25)), (radius.horizontal_radius - device_pixel_width.value()) * AK::sin<float>(AK::Pi<float> * 0.25));
+            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-(opposite_radius.horizontal_radius - device_pixel_width.value()) * (1 - AK::cos(AK::Pi<float> * 0.25)), (opposite_radius.horizontal_radius - device_pixel_width.value()) * AK::sin<float>(AK::Pi<float> * 0.25));
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_corner);
         } else {
@@ -352,7 +360,8 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         if (borders_data.top.width == 0) {
             corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
         } else {
-            corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius * (1 - 1 / AK::sqrt(2.0f)), -opposite_radius.vertical_radius / AK::sqrt(2.0f));
+            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
+            corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius - midpoint.x(), -midpoint.y());
         }
 
         Gfx::FloatPoint border_corner_gap_2 = Gfx::FloatPoint(0, context.enclosing_device_pixels(borders_data.top.width).value() - opposite_radius.vertical_radius);
@@ -373,7 +382,8 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
 
         if (device_pixel_width < opposite_radius.vertical_radius) {
             right = true;
-            Gfx::FloatPoint inner_corner = Gfx::FloatPoint((opposite_radius.vertical_radius - device_pixel_width.value()) * (1 - AK::cos(AK::Pi<float> * 0.25)), -(opposite_radius.horizontal_radius - device_pixel_width.value()) * AK::sin<float>(AK::Pi<float> * 0.25));
+            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - context.enclosing_device_pixels(borders_data.top.width).value());
+            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(opposite_radius.horizontal_radius - device_pixel_width.value() - midpoint.x(), -midpoint.y());
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()));
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + inner_corner);
         } else {
