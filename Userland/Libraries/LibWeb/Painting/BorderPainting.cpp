@@ -147,24 +147,16 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         path.move_to(points[current++]);
         path.elliptical_arc_to(
             points[current++],
-            // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
-            // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
             Gfx::FloatSize(radius.horizontal_radius, radius.vertical_radius),
             0,
-            // 0.01,
-            // 0.01,
             false,
             false);
         path.line_to(points[current++]);
         if (left) {
             path.elliptical_arc_to(
                 points[current++],
-                // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
-                // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
                 Gfx::FloatSize(radius.horizontal_radius - left_offset.width(), radius.vertical_radius - left_offset.height()),
-                AK::Pi<double>,
-                // 0.01,
-                // 0.01,
+                0,
                 false,
                 true);
         }
@@ -172,24 +164,16 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
         if (right) {
             path.elliptical_arc_to(
                 points[current++],
-                // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
-                // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
                 Gfx::FloatSize(opposite_radius.horizontal_radius - right_offset.width(), opposite_radius.vertical_radius - right_offset.height()),
                 0,
-                // 0.01,
-                // 0.01,
                 false,
                 true);
         }
         path.line_to(points[current++]);
         path.elliptical_arc_to(
             points[current++],
-            // Gfx::FloatPoint(rect.top_left().moved_left(radius.horizontal_radius / AK::sqrt(2.0f)).x().value(), rect.top_left().moved_down(radius.vertical_radius * 1.0f - radius.vertical_radius / AK::sqrt(2.0f)).y().value()),
-            // Gfx::FloatPoint(rect.top_left().x().value(), rect.top_left().moved_down(radius.vertical_radius).y().value()),
             Gfx::FloatSize(opposite_radius.horizontal_radius, opposite_radius.vertical_radius),
-            AK::Pi<double>,
-            // 0.01,
-            // 0.01,
+            0,
             false,
             false);
         path.close();
@@ -207,206 +191,229 @@ void paint_border(PaintContext& context, BorderEdge edge, DevicePixelRect const&
 
     switch (edge) {
     case BorderEdge::Top: {
-        Gfx::FloatPoint corner_offset_1;
-        Gfx::FloatPoint corner_offset_2;
+        auto converged_border_width = context.enclosing_device_pixels(borders_data.left.width);
+        auto opposite_converged_border_width = context.enclosing_device_pixels(borders_data.right.width);
+        auto converged_corner_has_inner_corner = false;
+        auto opposite_converged_corner_has_inner_corner = false;
+        Gfx::FloatPoint converged_corner_endpoint_offset;
+        Gfx::FloatPoint opposite_converged_border_corner_offset;
         if (borders_data.left.width == 0) {
-            corner_offset_1 = Gfx::FloatPoint(-radius.horizontal_radius, radius.vertical_radius);
+            converged_corner_endpoint_offset = Gfx::FloatPoint(-radius.horizontal_radius, radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(radius.horizontal_radius, radius.vertical_radius);
-            corner_offset_1 = Gfx::FloatPoint(-midpoint.x(), radius.vertical_radius - midpoint.y());
+            converged_corner_endpoint_offset = Gfx::FloatPoint(-midpoint.x(), radius.vertical_radius - midpoint.y());
         }
 
         if (borders_data.right.width == 0) {
-            corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
-            corner_offset_2 = Gfx::FloatPoint(midpoint.x(), opposite_radius.vertical_radius - midpoint.y());
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(midpoint.x(), opposite_radius.vertical_radius - midpoint.y());
         }
 
         Vector<Gfx::FloatPoint> points;
         points.ensure_capacity(8);
         points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()));
-        points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + corner_offset_1);
+        points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + converged_corner_endpoint_offset);
 
-        bool left = false;
-        bool right = false;
-        if (device_pixel_width.value() < radius.vertical_radius) {
-            left = true;
-            auto midpoint = compute_midpoint(radius.horizontal_radius - context.enclosing_device_pixels(borders_data.left.width).value(), radius.vertical_radius - device_pixel_width.value());
-            // dbgln("width is {}, radius is {}", context.enclosing_device_pixels(borders_data.top.width).value(), radius.vertical_radius);
-            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-midpoint.x(), radius.vertical_radius - device_pixel_width.value() - midpoint.y());
-            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_corner);
+        if (device_pixel_width < radius.vertical_radius && converged_border_width < radius.horizontal_radius) {
+            converged_corner_has_inner_corner = true;
+            Gfx::FloatPoint midpoint = compute_midpoint(
+                radius.horizontal_radius - converged_border_width.value(),
+                radius.vertical_radius - device_pixel_width.value());
+            Gfx::FloatPoint inner_corner_endpoint_offset = Gfx::FloatPoint(
+                -midpoint.x(),
+                radius.vertical_radius - device_pixel_width.value() - midpoint.y());
+            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_corner_endpoint_offset);
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
         } else {
-            Gfx::FloatPoint border_corner_gap_1 = Gfx::FloatPoint(context.enclosing_device_pixels(borders_data.left.width).value() - radius.horizontal_radius, 0);
-            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + border_corner_gap_1);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(
+                converged_border_width.value() - radius.horizontal_radius,
+                0);
+            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_right_angle_offset);
         }
 
-        if (device_pixel_width.value() < opposite_radius.vertical_radius) {
-            right = true;
-            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - context.enclosing_device_pixels(borders_data.right.width).value(), opposite_radius.vertical_radius - device_pixel_width.value());
-            Gfx::FloatPoint inner_corner = Gfx::FloatPoint(midpoint.x(), opposite_radius.vertical_radius - device_pixel_width.value() - midpoint.y());
+        if (device_pixel_width < opposite_radius.vertical_radius && opposite_converged_border_width < opposite_radius.horizontal_radius) {
+            opposite_converged_corner_has_inner_corner = true;
+            Gfx::FloatPoint midpoint = compute_midpoint(
+                opposite_radius.horizontal_radius - opposite_converged_border_width.value(),
+                opposite_radius.vertical_radius - device_pixel_width.value());
+            Gfx::FloatPoint inner_corner_endpoint_offset = Gfx::FloatPoint(
+                midpoint.x(),
+                opposite_radius.vertical_radius - device_pixel_width.value() - midpoint.y());
             points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()));
-            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + inner_corner);
+            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + inner_corner_endpoint_offset);
         } else {
-            Gfx::FloatPoint border_corner_gap_2 = Gfx::FloatPoint(context.enclosing_device_pixels(borders_data.right.width).value() - opposite_radius.horizontal_radius, 0);
-            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) - border_corner_gap_2);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(
+                opposite_converged_border_width.value() - opposite_radius.horizontal_radius,
+                0);
+            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) - inner_right_angle_offset);
         }
 
-        points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + corner_offset_2);
+        points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + opposite_converged_border_corner_offset);
         points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()));
-        draw_border(points, left, right, Gfx::FloatSize(context.enclosing_device_pixels(borders_data.left.width).value(), device_pixel_width.value()), Gfx::FloatSize(context.enclosing_device_pixels(borders_data.right.width).value(), device_pixel_width.value()));
+        draw_border(
+            points,
+            converged_corner_has_inner_corner,
+            opposite_converged_corner_has_inner_corner,
+            Gfx::FloatSize(converged_border_width.value(), device_pixel_width.value()),
+            Gfx::FloatSize(opposite_converged_border_width.value(), device_pixel_width.value()));
         break;
     }
     case BorderEdge::Right: {
-        Gfx::FloatPoint corner_offset_1;
-        Gfx::FloatPoint corner_offset_2;
+        auto converged_border_width = context.enclosing_device_pixels(borders_data.top.width);
+        auto opposite_converged_border_width = context.enclosing_device_pixels(borders_data.bottom.width);
+        auto converged_corner_has_inner_corner = false;
+        auto opposite_converged_corner_has_inner_corner = false;
+        Gfx::FloatPoint converged_corner_endpoint_offset;
+        Gfx::FloatPoint opposite_converged_border_corner_offset;
         if (borders_data.top.width == 0) {
-            corner_offset_1 = Gfx::FloatPoint(-radius.horizontal_radius, -radius.vertical_radius);
+            converged_corner_endpoint_offset = Gfx::FloatPoint(-radius.horizontal_radius, -radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(radius.horizontal_radius, radius.vertical_radius);
-            corner_offset_1 = Gfx::FloatPoint(midpoint.x() - radius.horizontal_radius, -midpoint.y());
+            converged_corner_endpoint_offset = Gfx::FloatPoint(midpoint.x() - radius.horizontal_radius, -midpoint.y());
         }
 
         if (borders_data.bottom.width == 0) {
-            corner_offset_2 = Gfx::FloatPoint(-opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(-opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
-            corner_offset_2 = Gfx::FloatPoint(midpoint.x() - opposite_radius.horizontal_radius, midpoint.y());
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(midpoint.x() - opposite_radius.horizontal_radius, midpoint.y());
         }
 
         Vector<Gfx::FloatPoint> points;
         points.ensure_capacity(6);
         points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()));
-        points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + corner_offset_1);
-        bool left = false;
-        bool right = false;
-        if (device_pixel_width < radius.horizontal_radius) {
-            left = true;
-            auto midpoint = compute_midpoint(radius.horizontal_radius - device_pixel_width.value(), radius.vertical_radius - context.enclosing_device_pixels(borders_data.top.width).value());
+        points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + converged_corner_endpoint_offset);
+
+        if (device_pixel_width < radius.horizontal_radius && converged_border_width < radius.vertical_radius) {
+            converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(radius.horizontal_radius - device_pixel_width.value(), radius.vertical_radius - converged_border_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-(radius.horizontal_radius - midpoint.x() - device_pixel_width.value()), -midpoint.y());
             points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + inner_corner);
             points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()));
         } else {
-            Gfx::FloatPoint border_corner_gap_1 = Gfx::FloatPoint(0, context.enclosing_device_pixels(borders_data.top.width).value() - radius.horizontal_radius);
-            points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + border_corner_gap_1);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(0, converged_border_width.value() - radius.horizontal_radius);
+            points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + inner_right_angle_offset);
         }
 
-        if (device_pixel_width < opposite_radius.horizontal_radius) {
-            right = true;
-            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - context.enclosing_device_pixels(borders_data.bottom.width).value());
+        if (device_pixel_width < opposite_radius.horizontal_radius && context.enclosing_device_pixels(borders_data.bottom.width) < opposite_radius.vertical_radius) {
+            opposite_converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - opposite_converged_border_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-(opposite_radius.horizontal_radius - midpoint.x() - device_pixel_width.value()), midpoint.y());
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
             points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + inner_corner);
         } else {
-            Gfx::FloatPoint border_corner_gap_2 = Gfx::FloatPoint(0, context.enclosing_device_pixels(borders_data.bottom.width).value() - opposite_radius.horizontal_radius);
-            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) - border_corner_gap_2);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(0, opposite_converged_border_width.value() - opposite_radius.horizontal_radius);
+            points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) - inner_right_angle_offset);
         }
 
-        points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + corner_offset_2);
+        points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + opposite_converged_border_corner_offset);
         points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()));
-        draw_border(points, left, right, Gfx::FloatSize(device_pixel_width.value(), context.enclosing_device_pixels(borders_data.top.width).value()), Gfx::FloatSize(device_pixel_width.value(), context.enclosing_device_pixels(borders_data.bottom.width).value()));
+        draw_border(points, converged_corner_has_inner_corner, opposite_converged_corner_has_inner_corner, Gfx::FloatSize(device_pixel_width.value(), converged_border_width.value()), Gfx::FloatSize(device_pixel_width.value(), opposite_converged_border_width.value()));
         break;
     }
     case BorderEdge::Bottom: {
-        Gfx::FloatPoint corner_offset_1;
-        Gfx::FloatPoint corner_offset_2;
+        auto converged_border_width = context.enclosing_device_pixels(borders_data.right.width);
+        auto opposite_converged_border_width = context.enclosing_device_pixels(borders_data.left.width);
+        auto converged_corner_has_inner_corner = false;
+        auto opposite_converged_corner_has_inner_corner = false;
+        Gfx::FloatPoint converged_corner_endpoint_offset;
+        Gfx::FloatPoint opposite_converged_border_corner_offset;
         if (borders_data.right.width == 0) {
-            corner_offset_1 = Gfx::FloatPoint(radius.horizontal_radius, -radius.vertical_radius);
+            converged_corner_endpoint_offset = Gfx::FloatPoint(radius.horizontal_radius, -radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(radius.horizontal_radius, radius.vertical_radius);
-            corner_offset_1 = Gfx::FloatPoint(midpoint.x(), midpoint.y() - radius.vertical_radius);
+            converged_corner_endpoint_offset = Gfx::FloatPoint(midpoint.x(), midpoint.y() - radius.vertical_radius);
         }
 
         if (borders_data.left.width == 0) {
-            corner_offset_2 = Gfx::FloatPoint(-opposite_radius.horizontal_radius, -opposite_radius.vertical_radius);
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(-opposite_radius.horizontal_radius, -opposite_radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
-            corner_offset_2 = Gfx::FloatPoint(-midpoint.x(), midpoint.y() - opposite_radius.vertical_radius);
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(-midpoint.x(), midpoint.y() - opposite_radius.vertical_radius);
         }
 
         Vector<Gfx::FloatPoint> points;
         points.ensure_capacity(6);
         points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()));
-        points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + corner_offset_1);
+        points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + converged_corner_endpoint_offset);
 
-        bool left = false;
-        bool right = false;
-        if (device_pixel_width < radius.vertical_radius) {
-            left = true;
-            auto midpoint = compute_midpoint(radius.horizontal_radius - context.enclosing_device_pixels(borders_data.right.width).value(), radius.vertical_radius - device_pixel_width.value());
+        if (device_pixel_width < radius.vertical_radius && converged_border_width < radius.horizontal_radius) {
+            converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(radius.horizontal_radius - converged_border_width.value(), radius.vertical_radius - device_pixel_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(midpoint.x(), -(radius.vertical_radius - midpoint.y() - device_pixel_width.value()));
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + inner_corner);
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()));
         } else {
-            Gfx::FloatPoint border_corner_gap_1 = Gfx::FloatPoint(context.enclosing_device_pixels(borders_data.right.width).value() - radius.horizontal_radius, 0);
-            points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) - border_corner_gap_1);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(converged_border_width.value() - radius.horizontal_radius, 0);
+            points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) - inner_right_angle_offset);
         }
 
-        if (device_pixel_width < opposite_radius.vertical_radius) {
-            right = true;
-            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - context.enclosing_device_pixels(borders_data.left.width).value(), opposite_radius.vertical_radius - device_pixel_width.value());
+        if (device_pixel_width < opposite_radius.vertical_radius && opposite_converged_border_width < opposite_radius.horizontal_radius) {
+            opposite_converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - opposite_converged_border_width.value(), opposite_radius.vertical_radius - device_pixel_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(-midpoint.x(), -(opposite_radius.vertical_radius - midpoint.y() - device_pixel_width.value()));
             points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()));
             points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + inner_corner);
         } else {
-            Gfx::FloatPoint border_corner_gap_2 = Gfx::FloatPoint(context.enclosing_device_pixels(borders_data.left.width).value() - opposite_radius.horizontal_radius, 0);
-            points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + border_corner_gap_2);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(opposite_converged_border_width.value() - opposite_radius.horizontal_radius, 0);
+            points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + inner_right_angle_offset);
         }
-        points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + corner_offset_2);
+        points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + opposite_converged_border_corner_offset);
         points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
-        draw_border(points, left, right, Gfx::FloatSize(context.enclosing_device_pixels(borders_data.right.width).value(), device_pixel_width.value()), Gfx::FloatSize(context.enclosing_device_pixels(borders_data.left.width).value(), device_pixel_width.value()));
+        draw_border(points, converged_corner_has_inner_corner, opposite_converged_corner_has_inner_corner, Gfx::FloatSize(converged_border_width.value(), device_pixel_width.value()), Gfx::FloatSize(opposite_converged_border_width.value(), device_pixel_width.value()));
         break;
     }
     case BorderEdge::Left: {
-        Gfx::AntiAliasingPainter aa_painter { context.painter() };
-        Gfx::FloatPoint corner_offset_1;
-        Gfx::FloatPoint corner_offset_2;
-        bool left = false;
-        bool right = false;
+        auto converged_border_width = context.enclosing_device_pixels(borders_data.bottom.width);
+        auto opposite_converged_border_width = context.enclosing_device_pixels(borders_data.top.width);
+        auto converged_corner_has_inner_corner = false;
+        auto opposite_converged_corner_has_inner_corner = false;
+        Gfx::FloatPoint converged_corner_endpoint_offset;
+        Gfx::FloatPoint opposite_converged_border_corner_offset;
         if (borders_data.bottom.width == 0) {
-            corner_offset_1 = Gfx::FloatPoint(radius.horizontal_radius, radius.vertical_radius);
+            converged_corner_endpoint_offset = Gfx::FloatPoint(radius.horizontal_radius, radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(radius.horizontal_radius, radius.vertical_radius);
-            corner_offset_1 = Gfx::FloatPoint(radius.horizontal_radius - midpoint.x(), midpoint.y());
+            converged_corner_endpoint_offset = Gfx::FloatPoint(radius.horizontal_radius - midpoint.x(), midpoint.y());
         }
 
         if (borders_data.top.width == 0) {
-            corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
         } else {
             auto midpoint = compute_midpoint(opposite_radius.horizontal_radius, opposite_radius.vertical_radius);
-            corner_offset_2 = Gfx::FloatPoint(opposite_radius.horizontal_radius - midpoint.x(), -midpoint.y());
+            opposite_converged_border_corner_offset = Gfx::FloatPoint(opposite_radius.horizontal_radius - midpoint.x(), -midpoint.y());
         }
-
-        Gfx::FloatPoint border_corner_gap_2 = Gfx::FloatPoint(0, context.enclosing_device_pixels(borders_data.top.width).value() - opposite_radius.vertical_radius);
 
         Vector<Gfx::FloatPoint> points;
         points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()));
-        points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + corner_offset_1);
+        points.append(Gfx::FloatPoint(rect.bottom_left().to_type<int>()) + converged_corner_endpoint_offset);
 
-        if (device_pixel_width < radius.vertical_radius) {
-            left = true;
-            auto midpoint = compute_midpoint(radius.horizontal_radius - device_pixel_width.value(), radius.vertical_radius - context.enclosing_device_pixels(borders_data.bottom.width).value());
+        if (device_pixel_width < radius.horizontal_radius && converged_border_width < radius.vertical_radius) {
+            converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(radius.horizontal_radius - device_pixel_width.value(), radius.vertical_radius - converged_border_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(radius.horizontal_radius - device_pixel_width.value() - midpoint.x(), midpoint.y());
             points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) + inner_corner);
             points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()));
         } else {
-            Gfx::FloatPoint border_corner_gap_1 = Gfx::FloatPoint(0, context.enclosing_device_pixels(borders_data.bottom.width).value() - radius.vertical_radius);
-            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) - border_corner_gap_1);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(0, converged_border_width.value() - radius.vertical_radius);
+            points.append(Gfx::FloatPoint(rect.bottom_right().to_type<int>()) - inner_right_angle_offset);
         }
 
-        if (device_pixel_width < opposite_radius.vertical_radius) {
-            right = true;
-            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - context.enclosing_device_pixels(borders_data.top.width).value());
+        if (device_pixel_width < opposite_radius.horizontal_radius && opposite_converged_border_width < opposite_radius.vertical_radius) {
+            opposite_converged_corner_has_inner_corner = true;
+            auto midpoint = compute_midpoint(opposite_radius.horizontal_radius - device_pixel_width.value(), opposite_radius.vertical_radius - opposite_converged_border_width.value());
             Gfx::FloatPoint inner_corner = Gfx::FloatPoint(opposite_radius.horizontal_radius - device_pixel_width.value() - midpoint.x(), -midpoint.y());
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()));
             points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + inner_corner);
         } else {
-            points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + border_corner_gap_2);
+            Gfx::FloatPoint inner_right_angle_offset = Gfx::FloatPoint(0, opposite_converged_border_width.value() - opposite_radius.vertical_radius);
+            points.append(Gfx::FloatPoint(rect.top_right().to_type<int>()) + inner_right_angle_offset);
         }
-        points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + corner_offset_2);
+        points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()) + opposite_converged_border_corner_offset);
         points.append(Gfx::FloatPoint(rect.top_left().to_type<int>()));
-        draw_border(points, left, right, Gfx::FloatSize(device_pixel_width.value(), context.enclosing_device_pixels(borders_data.bottom.width).value()), Gfx::FloatSize(device_pixel_width.value(), context.enclosing_device_pixels(borders_data.top.width).value()));
+        draw_border(points, converged_corner_has_inner_corner, opposite_converged_corner_has_inner_corner, Gfx::FloatSize(device_pixel_width.value(), converged_border_width.value()), Gfx::FloatSize(device_pixel_width.value(), opposite_converged_border_width.value()));
         break;
     }
     }
