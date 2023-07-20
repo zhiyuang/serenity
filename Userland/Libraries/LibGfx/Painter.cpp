@@ -2416,11 +2416,11 @@ PainterStateSaver::~PainterStateSaver()
     m_painter.restore();
 }
 
-void Painter::stroke_path(Path const& path, Color color, int thickness)
+void Painter::stroke_path(Path const& path, Color color, int thickness, Path::StrokeLinecap stroke_linecap)
 {
     if (thickness <= 0)
         return;
-    fill_path(path.stroke_to_fill(thickness, Path::StrokeLinecap::Round), color);
+    fill_path(path.stroke_to_fill(thickness, stroke_linecap), color);
 }
 
 void Painter::blit_disabled(IntPoint location, Gfx::Bitmap const& bitmap, IntRect const& rect, Palette const& palette)

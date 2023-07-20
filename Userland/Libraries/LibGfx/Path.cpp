@@ -433,16 +433,12 @@ Path Path::stroke_to_fill(float thickness, StrokeLinecap linecap) const
         }
     }
 
-    int pen_vertex_count;
+    int pen_vertex_count = 4;
     Vector<FloatPoint, 4> pen_vertices;
 
-    // Generate vertices for the pen (going counterclockwise). The pen does not necessarily need
-    // to be a circle (or an approximation of one), but other shapes are untested.
-    dbgln("stroke line cap: {}", linecap == StrokeLinecap::Butt ? 1 : linecap == StrokeLinecap::Round ? 2
-                                                                                                      : 3);
+    // Generate vertices for the pen (going counterclockwise).
     switch (linecap) {
     case StrokeLinecap::Butt: {
-        pen_vertex_count = 4;
         pen_vertices.unchecked_append({ 0, -thickness / 2 });
         pen_vertices.unchecked_append({ 0, thickness / 2 });
         pen_vertices.unchecked_append({ thickness / 2, thickness / 2 });
@@ -450,20 +446,10 @@ Path Path::stroke_to_fill(float thickness, StrokeLinecap linecap) const
         break;
     }
     case StrokeLinecap::Square: {
-        pen_vertex_count = 4;
-        // float theta = AK::Pi<float> / 4;
-        // float theta_delta = (AK::Pi<float> * 2) / pen_vertex_count;
-        // for (int i = 0; i < pen_vertex_count; i++) {
-        //     float sin_theta;
-        //     float cos_theta;
-        //     AK::sincos(theta, sin_theta, cos_theta);
-        //     pen_vertices.unchecked_append({ cos_theta * thickness / 2, sin_theta * thickness / 2 });
-        //     theta -= theta_delta;
-        // }
-        pen_vertices.unchecked_append({ -thickness / 2, -thickness / 2 });
-        pen_vertices.unchecked_append({ -thickness / 2, thickness / 2 });
         pen_vertices.unchecked_append({ thickness / 2, thickness / 2 });
         pen_vertices.unchecked_append({ thickness / 2, -thickness / 2 });
+        pen_vertices.unchecked_append({ -thickness / 2, -thickness / 2 });
+        pen_vertices.unchecked_append({ -thickness / 2, thickness / 2 });
         break;
     }
     case StrokeLinecap::Round: {
