@@ -136,6 +136,9 @@ void SVGGraphicsElement::apply_presentational_hints(CSS::StyleProperties& style)
         } else if (name.equals_ignoring_ascii_case("fill-opacity"sv)) {
             if (auto fill_opacity_value = parse_css_value(parsing_context, value, CSS::PropertyID::FillOpacity).release_value_but_fixme_should_propagate_errors())
                 style.set_property(CSS::PropertyID::FillOpacity, fill_opacity_value.release_nonnull());
+        } else if (name.equals_ignoring_ascii_case("stroke-linecap"sv)) {
+            if (auto stroke_linecap = parse_css_value(parsing_context, value, CSS::PropertyID::StrokeLinecap).release_value_but_fixme_should_propagate_errors())
+                style.set_property(CSS::PropertyID::StrokeLinecap, stroke_linecap.release_nonnull());
         } else if (name.equals_ignoring_ascii_case("stroke-opacity"sv)) {
             if (auto stroke_opacity_value = parse_css_value(parsing_context, value, CSS::PropertyID::FillOpacity).release_value_but_fixme_should_propagate_errors())
                 style.set_property(CSS::PropertyID::StrokeOpacity, stroke_opacity_value.release_nonnull());
@@ -191,6 +194,22 @@ Optional<float> SVGGraphicsElement::fill_opacity() const
     if (!layout_node())
         return {};
     return layout_node()->computed_values().fill_opacity();
+}
+
+Optional<StrokeLinecap> SVGGraphicsElement::stroke_linecap() const
+{
+    if (!layout_node())
+        return {};
+    switch (layout_node()->computed_values().stroke_linecap()) {
+    case CSS::StrokeLinecap::Butt:
+        return StrokeLinecap::Butt;
+    case CSS::StrokeLinecap::Square:
+        return StrokeLinecap::Square;
+    case CSS::StrokeLinecap::Round:
+        return StrokeLinecap::Round;
+    default:
+        VERIFY_NOT_REACHED();
+    }
 }
 
 Optional<float> SVGGraphicsElement::stroke_opacity() const

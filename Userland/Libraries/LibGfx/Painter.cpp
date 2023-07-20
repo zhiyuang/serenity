@@ -2420,7 +2420,7 @@ void Painter::stroke_path(Path const& path, Color color, int thickness)
 {
     if (thickness <= 0)
         return;
-    fill_path(path.stroke_to_fill(thickness), color);
+    fill_path(path.stroke_to_fill(thickness, Path::StrokeLinecap::Round), color);
 }
 
 void Painter::blit_disabled(IntPoint location, Gfx::Bitmap const& bitmap, IntRect const& rect, Palette const& palette)

@@ -108,6 +108,12 @@ class Path {
 public:
     Path() = default;
 
+    enum class StrokeLinecap {
+        Butt,
+        Square,
+        Round
+    };
+
     void move_to(FloatPoint point)
     {
         append_segment<MoveSegment>(point);
@@ -195,7 +201,7 @@ public:
 
     DeprecatedString to_deprecated_string() const;
 
-    Path stroke_to_fill(float thickness) const;
+    Path stroke_to_fill(float thickness, StrokeLinecap linecap) const;
 
 private:
     void approximate_elliptical_arc_with_cubic_beziers(FloatPoint center, FloatSize radii, float x_axis_rotation, float theta, float theta_delta);

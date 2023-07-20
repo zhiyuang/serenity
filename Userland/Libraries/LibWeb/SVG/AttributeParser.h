@@ -125,6 +125,12 @@ enum class FillRule {
     Evenodd
 };
 
+enum class StrokeLinecap {
+    Butt,
+    Square,
+    Round
+};
+
 class AttributeParser final {
 public:
     ~AttributeParser() = default;

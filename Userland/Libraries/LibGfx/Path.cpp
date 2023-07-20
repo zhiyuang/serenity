@@ -411,7 +411,7 @@ private:
     ReadonlySpan<T> m_span;
 };
 
-Path Path::stroke_to_fill(float thickness) const
+Path Path::stroke_to_fill(float thickness, StrokeLinecap linecap) const
 {
     // Note: This convolves a polygon with the path using the algorithm described
     // in https://keithp.com/~keithp/talks/cairo2003.pdf (3.1 Stroking Splines via Convolution)
@@ -433,26 +433,62 @@ Path Path::stroke_to_fill(float thickness) const
         }
     }
 
-    // Note: This is the same as the tolerance from bezier curve splitting.
-    constexpr auto flatness = 0.015f;
-    auto pen_vertex_count = max(
-        static_cast<int>(ceilf(AK::Pi<float> / acosf(1 - (2 * flatness) / thickness))), 4);
-    if (pen_vertex_count % 2 == 1)
-        pen_vertex_count += 1;
-
-    Vector<FloatPoint, 128> pen_vertices;
-    pen_vertices.ensure_capacity(pen_vertex_count);
+    int pen_vertex_count;
+    Vector<FloatPoint, 4> pen_vertices;
 
     // Generate vertices for the pen (going counterclockwise). The pen does not necessarily need
     // to be a circle (or an approximation of one), but other shapes are untested.
-    float theta = 0;
-    float theta_delta = (AK::Pi<float> * 2) / pen_vertex_count;
-    for (int i = 0; i < pen_vertex_count; i++) {
-        float sin_theta;
-        float cos_theta;
-        AK::sincos(theta, sin_theta, cos_theta);
-        pen_vertices.unchecked_append({ cos_theta * thickness / 2, sin_theta * thickness / 2 });
-        theta -= theta_delta;
+    dbgln("stroke line cap: {}", linecap == StrokeLinecap::Butt ? 1 : linecap == StrokeLinecap::Round ? 2
+                                                                                                      : 3);
+    switch (linecap) {
+    case StrokeLinecap::Butt: {
+        pen_vertex_count = 4;
+        pen_vertices.unchecked_append({ 0, -thickness / 2 });
+        pen_vertices.unchecked_append({ 0, thickness / 2 });
+        pen_vertices.unchecked_append({ thickness / 2, thickness / 2 });
+        pen_vertices.unchecked_append({ thickness / 2, -thickness / 2 });
+        break;
+    }
+    case StrokeLinecap::Square: {
+        pen_vertex_count = 4;
+        // float theta = AK::Pi<float> / 4;
+        // float theta_delta = (AK::Pi<float> * 2) / pen_vertex_count;
+        // for (int i = 0; i < pen_vertex_count; i++) {
+        //     float sin_theta;
+        //     float cos_theta;
+        //     AK::sincos(theta, sin_theta, cos_theta);
+        //     pen_vertices.unchecked_append({ cos_theta * thickness / 2, sin_theta * thickness / 2 });
+        //     theta -= theta_delta;
+        // }
+        pen_vertices.unchecked_append({ -thickness / 2, -thickness / 2 });
+        pen_vertices.unchecked_append({ -thickness / 2, thickness / 2 });
+        pen_vertices.unchecked_append({ thickness / 2, thickness / 2 });
+        pen_vertices.unchecked_append({ thickness / 2, -thickness / 2 });
+        break;
+    }
+    case StrokeLinecap::Round: {
+        // Note: This is the same as the tolerance from bezier curve splitting.
+        constexpr auto flatness = 0.015f;
+        pen_vertex_count = max(
+            static_cast<int>(ceilf(AK::Pi<float> / acosf(1 - (2 * flatness) / thickness))), 4);
+        if (pen_vertex_count % 2 == 1)
+            pen_vertex_count += 1;
+
+        pen_vertices.ensure_capacity(pen_vertex_count);
+
+        float theta = 0;
+        float theta_delta = (AK::Pi<float> * 2) / pen_vertex_count;
+        for (int i = 0; i < pen_vertex_count; i++) {
+            float sin_theta;
+            float cos_theta;
+            AK::sincos(theta, sin_theta, cos_theta);
+            pen_vertices.unchecked_append({ cos_theta * thickness / 2, sin_theta * thickness / 2 });
+            theta -= theta_delta;
+        }
+        break;
+    }
+    default:
+        VERIFY_NOT_REACHED();
     }
 
     auto wrapping_index = [](auto& vertices, auto index) {

@@ -1815,6 +1815,14 @@
       "paint"
     ]
   },
+  "stroke-linecap": {
+    "affects-layout": false,
+    "inherited": true,
+    "initial": "butt",
+    "valid-types": [
+      "stroke-linecap"
+    ]
+  },
   "stroke-opacity": {
     "affects-layout": false,
     "inherited": true,

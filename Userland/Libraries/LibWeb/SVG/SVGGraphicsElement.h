@@ -31,6 +31,7 @@ public:
     Optional<Gfx::Color> stroke_color() const;
     Optional<float> stroke_width() const;
     Optional<float> fill_opacity() const;
+    Optional<StrokeLinecap> stroke_linecap() const;
     Optional<float> stroke_opacity() const;
 
     float visible_stroke_width() const
