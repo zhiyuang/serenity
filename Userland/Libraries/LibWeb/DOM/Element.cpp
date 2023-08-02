@@ -425,8 +425,8 @@ static Element::RequiredInvalidationAfterStyleChange compute_required_invalidati
             // OPTIMIZATION: An element creates a stacking context when its opacity changes from 1 to less than 1
             //               and stops to create one when opacity returns to 1. So stacking context tree rebuild is
             //               not required for opacity changes within the range below 1.
-            auto old_value_opacity = old_value.has_value() ? old_value->style->as_number().number() : 1;
-            auto new_value_opacity = new_value.has_value() ? new_value->style->as_number().number() : 1;
+            auto old_value_opacity = old_style.opacity();
+            auto new_value_opacity = new_style.opacity();
             if (old_value_opacity != new_value_opacity && (old_value_opacity == 1 || new_value_opacity == 1)) {
                 invalidation.rebuild_stacking_context_tree = true;
             }
@@ -753,7 +753,7 @@ int Element::client_top() const
     // 2. Return the computed value of the border-top-width property
     //    plus the height of any scrollbar rendered between the top padding edge and the top border edge,
     //    ignoring any transforms that apply to the element and its ancestors.
-    return static_cast<Layout::Box const&>(*layout_node()).computed_values().border_top().width;
+    return static_cast<Layout::Box const&>(*layout_node()).computed_values().border_top().width.to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-clientleft
@@ -769,7 +769,7 @@ int Element::client_left() const
     // 2. Return the computed value of the border-left-width property
     //    plus the width of any scrollbar rendered between the left padding edge and the left border edge,
     //    ignoring any transforms that apply to the element and its ancestors.
-    return static_cast<Layout::Box const&>(*layout_node()).computed_values().border_left().width;
+    return static_cast<Layout::Box const&>(*layout_node()).computed_values().border_left().width.to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-clientwidth

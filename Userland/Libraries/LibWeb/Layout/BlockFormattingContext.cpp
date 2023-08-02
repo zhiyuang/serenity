@@ -505,8 +505,17 @@ void BlockFormattingContext::layout_inline_children(BlockContainer const& block_
         layout_mode,
         available_space);
 
-    if (!block_container_state.has_definite_width())
-        block_container_state.set_content_width(context.automatic_content_width());
+    if (!block_container_state.has_definite_width()) {
+        // NOTE: max-width for boxes with inline children can only be applied after inside layout is done
+        //       and width of box content is known
+        auto used_width_px = context.automatic_content_width();
+        if (!should_treat_max_width_as_none(block_container, available_space.width)) {
+            auto max_width_px = calculate_inner_width(block_container, available_space.width, block_container.computed_values().max_width()).to_px(block_container);
+            if (used_width_px > max_width_px)
+                used_width_px = max_width_px;
+        }
+        block_container_state.set_content_width(used_width_px);
+    }
     if (!block_container_state.has_definite_height())
         block_container_state.set_content_height(context.automatic_content_height());
 }
@@ -601,7 +610,7 @@ void BlockFormattingContext::layout_block_level_box(Box const& box, BlockContain
     }
 
     m_margin_state.add_margin(box_state.margin_top);
-    auto introduce_clearance = clear_floating_boxes(box);
+    auto introduce_clearance = clear_floating_boxes(box, {});
     if (introduce_clearance == DidIntroduceClearance::Yes)
         m_margin_state.reset();
 
@@ -752,7 +761,7 @@ CSSPixels BlockFormattingContext::BlockMarginState::current_collapsed_margin() c
     return collapsed_margin;
 }
 
-BlockFormattingContext::DidIntroduceClearance BlockFormattingContext::clear_floating_boxes(Node const& child_box)
+BlockFormattingContext::DidIntroduceClearance BlockFormattingContext::clear_floating_boxes(Node const& child_box, Optional<InlineFormattingContext&> inline_formatting_context)
 {
     auto const& computed_values = child_box.computed_values();
     auto result = DidIntroduceClearance::No;
@@ -777,7 +786,12 @@ BlockFormattingContext::DidIntroduceClearance BlockFormattingContext::clear_floa
             for (auto* containing_block = child_box.containing_block(); containing_block && containing_block != &root(); containing_block = containing_block->containing_block())
                 clearance_y_in_containing_block -= m_state.get(*containing_block).offset.y();
 
-            if (clearance_y_in_containing_block > m_y_offset_of_current_block_container.value()) {
+            if (inline_formatting_context.has_value()) {
+                if (clearance_y_in_containing_block > inline_formatting_context->vertical_float_clearance()) {
+                    result = DidIntroduceClearance::Yes;
+                    inline_formatting_context->set_vertical_float_clearance(clearance_y_in_containing_block);
+                }
+            } else if (clearance_y_in_containing_block > m_y_offset_of_current_block_container.value()) {
                 result = DidIntroduceClearance::Yes;
                 m_y_offset_of_current_block_container = clearance_y_in_containing_block;
             }
@@ -879,7 +893,7 @@ void BlockFormattingContext::layout_floating_box(Box const& box, BlockContainer 
     // First we place the box normally (to get the right y coordinate.)
     // If we have a LineBuilder, we're in the middle of inline layout, otherwise this is block layout.
     if (line_builder) {
-        auto y = line_builder->y_for_float_to_be_inserted_here(box);
+        auto y = max(line_builder->y_for_float_to_be_inserted_here(box), line_builder->inline_formatting_context().vertical_float_clearance());
         box_state.set_content_y(y + box_state.margin_box_top());
     } else {
         place_block_level_element_in_normal_flow_vertically(box, y + box_state.margin_top);

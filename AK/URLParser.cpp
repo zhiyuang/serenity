@@ -32,7 +32,7 @@ static void report_validation_error(SourceLocation const& location = SourceLocat
     dbgln_if(URL_PARSER_DEBUG, "URLParser::basic_parse: Validation error! {}", location);
 }
 
-static Optional<DeprecatedString> parse_opaque_host(StringView input)
+static Optional<URL::Host> parse_opaque_host(StringView input)
 {
     auto forbidden_host_characters_excluding_percent = "\0\t\n\r #/:<>?@[\\]^|"sv;
     for (auto character : forbidden_host_characters_excluding_percent) {
@@ -43,7 +43,7 @@ static Optional<DeprecatedString> parse_opaque_host(StringView input)
     }
     // FIXME: If input contains a code point that is not a URL code point and not U+0025 (%), validation error.
     // FIXME: If input contains a U+0025 (%) and the two code points following it are not ASCII hex digits, validation error.
-    return URL::percent_encode(input, URL::PercentEncodeSet::C0Control);
+    return String::from_deprecated_string(URL::percent_encode(input, URL::PercentEncodeSet::C0Control)).release_value_but_fixme_should_propagate_errors();
 }
 
 struct ParsedIPv4Number {
@@ -121,7 +121,7 @@ static Optional<ParsedIPv4Number> parse_ipv4_number(StringView input)
 }
 
 // https://url.spec.whatwg.org/#concept-ipv4-parser
-static Optional<u32> parse_ipv4_address(StringView input)
+static Optional<URL::IPv4Address> parse_ipv4_address(StringView input)
 {
     // 1. Let parts be the result of strictly splitting input on U+002E (.).
     auto parts = input.split_view("."sv, SplitBehavior::KeepEmpty);
@@ -201,7 +201,7 @@ static Optional<u32> parse_ipv4_address(StringView input)
 }
 
 // https://url.spec.whatwg.org/#concept-ipv4-serializer
-static ErrorOr<String> serialize_ipv4_address(u32 address)
+static ErrorOr<String> serialize_ipv4_address(URL::IPv4Address address)
 {
     // 1. Let output be the empty string.
     // NOTE: Array to avoid prepend.
@@ -227,13 +227,11 @@ static ErrorOr<String> serialize_ipv4_address(u32 address)
 }
 
 // https://url.spec.whatwg.org/#concept-ipv6-serializer
-static ErrorOr<String> serialize_ipv6_address(Array<u16, 8> const& address)
+static void serialize_ipv6_address(URL::IPv6Address const& address, StringBuilder& output)
 {
     // 1. Let output be the empty string.
-    StringBuilder output;
 
     // 2. Let compress be an index to the first IPv6 piece in the first longest sequences of address’s IPv6 pieces that are 0.
-    // 3. If there is no sequence of address’s IPv6 pieces that are 0 that is longer than 1, then set compress to null.
     Optional<size_t> compress;
     size_t longest_sequence_length = 0;
     size_t current_sequence_length = 0;
@@ -251,6 +249,11 @@ static ErrorOr<String> serialize_ipv6_address(Array<u16, 8> const& address)
             current_sequence_length = 0;
         }
     }
+
+    // 3. If there is no sequence of address’s IPv6 pieces that are 0 that is longer than 1, then set compress to null.
+    if (longest_sequence_length <= 1)
+        compress = {};
+
     // 4. Let ignore0 be false.
     auto ignore0 = false;
 
@@ -286,11 +289,10 @@ static ErrorOr<String> serialize_ipv6_address(Array<u16, 8> const& address)
     }
 
     // 6. Return output.
-    return output.to_string();
 }
 
 // https://url.spec.whatwg.org/#concept-ipv6-parser
-static Optional<Array<u16, 8>> parse_ipv6_address(StringView input)
+static Optional<URL::IPv6Address> parse_ipv6_address(StringView input)
 {
     // 1. Let address be a new IPv6 address whose IPv6 pieces are all 0.
     Array<u16, 8> address {};
@@ -551,7 +553,7 @@ static bool ends_in_a_number_checker(StringView input)
 
 // https://url.spec.whatwg.org/#concept-host-parser
 // NOTE: This is a very bare-bones implementation.
-static Optional<DeprecatedString> parse_host(StringView input, bool is_not_special = false)
+static Optional<URL::Host> parse_host(StringView input, bool is_not_special = false)
 {
     // 1. If input starts with U+005B ([), then:
     if (input.starts_with('[')) {
@@ -565,11 +567,7 @@ static Optional<DeprecatedString> parse_host(StringView input, bool is_not_speci
         auto address = parse_ipv6_address(input.substring_view(1, input.length() - 2));
         if (!address.has_value())
             return {};
-
-        auto result = serialize_ipv6_address(*address);
-        if (result.is_error())
-            return {};
-        return result.release_value().to_deprecated_string();
+        return address.release_value();
     }
 
     // 2. If isNotSpecial is true, then return the result of opaque-host parsing input.
@@ -584,12 +582,16 @@ static Optional<DeprecatedString> parse_host(StringView input, bool is_not_speci
 
     // FIXME: 5. Let asciiDomain be the result of running domain to ASCII on domain.
     // FIXME: 6. If asciiDomain is failure, then return failure.
-    auto& ascii_domain = domain;
+    auto ascii_domain_or_error = String::from_deprecated_string(domain);
+    if (ascii_domain_or_error.is_error())
+        return {};
+
+    auto ascii_domain = ascii_domain_or_error.release_value();
 
     // 7. If asciiDomain contains a forbidden domain code point, domain-invalid-code-point validation error, return failure.
     auto forbidden_host_characters = "\0\t\n\r #%/:<>?@[\\]^|"sv;
     for (auto character : forbidden_host_characters) {
-        if (ascii_domain.view().contains(character)) {
+        if (ascii_domain.bytes_as_string_view().contains(character)) {
             report_validation_error();
             return {};
         }
@@ -601,15 +603,31 @@ static Optional<DeprecatedString> parse_host(StringView input, bool is_not_speci
         if (!ipv4_host.has_value())
             return {};
 
-        auto result = serialize_ipv4_address(*ipv4_host);
-        if (result.is_error())
-            return {};
-
-        return result.release_value().to_deprecated_string();
+        return ipv4_host.release_value();
     }
 
     // 9. Return asciiDomain.
     return ascii_domain;
+}
+
+// https://url.spec.whatwg.org/#concept-host-serializer
+ErrorOr<String> URLParser::serialize_host(URL::Host const& host)
+{
+    // 1. If host is an IPv4 address, return the result of running the IPv4 serializer on host.
+    if (host.has<URL::IPv4Address>())
+        return serialize_ipv4_address(host.get<URL::IPv4Address>());
+
+    // 2. Otherwise, if host is an IPv6 address, return U+005B ([), followed by the result of running the IPv6 serializer on host, followed by U+005D (]).
+    if (host.has<URL::IPv6Address>()) {
+        StringBuilder output;
+        TRY(output.try_append('['));
+        serialize_ipv6_address(host.get<URL::IPv6Address>(), output);
+        TRY(output.try_append(']'));
+        return output.to_string();
+    }
+
+    // 3. Otherwise, host is a domain, opaque host, or empty host, return host.
+    return host.get<String>();
 }
 
 // https://url.spec.whatwg.org/#start-with-a-windows-drive-letter
@@ -679,42 +697,6 @@ DeprecatedString URLParser::percent_encode_after_encoding(StringView input, URL:
     return output.to_deprecated_string();
 }
 
-// https://fetch.spec.whatwg.org/#data-urls
-// FIXME: This only loosely follows the spec, as we use the same class for "regular" and data URLs, unlike the spec.
-Optional<URL> URLParser::parse_data_url(StringView raw_input)
-{
-    dbgln_if(URL_PARSER_DEBUG, "URLParser::parse_data_url: Parsing '{}'.", raw_input);
-    VERIFY(raw_input.starts_with("data:"sv));
-    auto input = raw_input.substring_view(5);
-    auto comma_offset = input.find(',');
-    if (!comma_offset.has_value())
-        return {};
-    auto mime_type = StringUtils::trim(input.substring_view(0, comma_offset.value()), "\t\n\f\r "sv, TrimMode::Both);
-    auto encoded_body = input.substring_view(comma_offset.value() + 1);
-    auto body = URL::percent_decode(encoded_body);
-    bool is_base64_encoded = false;
-    if (mime_type.ends_with("base64"sv, CaseSensitivity::CaseInsensitive)) {
-        auto substring_view = mime_type.substring_view(0, mime_type.length() - 6);
-        auto trimmed_substring_view = StringUtils::trim(substring_view, " "sv, TrimMode::Right);
-        if (trimmed_substring_view.ends_with(';')) {
-            is_base64_encoded = true;
-            mime_type = trimmed_substring_view.substring_view(0, trimmed_substring_view.length() - 1);
-        }
-    }
-
-    StringBuilder builder;
-    if (mime_type.starts_with(";"sv) || mime_type.is_empty()) {
-        builder.append("text/plain"sv);
-        builder.append(mime_type);
-        mime_type = builder.string_view();
-    }
-
-    // FIXME: Parse the MIME type's components according to https://mimesniff.spec.whatwg.org/#parse-a-mime-type
-    URL url { StringUtils::trim(mime_type, "\n\r\t "sv, TrimMode::Both), move(body), is_base64_encoded };
-    dbgln_if(URL_PARSER_DEBUG, "URLParser::parse_data_url: Parsed data URL to be '{}'.", url.serialize());
-    return url;
-}
-
 // https://url.spec.whatwg.org/#concept-basic-url-parser
 // NOTE: This parser assumes a UTF-8 encoding.
 // NOTE: Refrain from using the URL classes setters inside this algorithm. Rather, set the values directly. This bypasses the setters' built-in
@@ -727,13 +709,6 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
     dbgln_if(URL_PARSER_DEBUG, "URLParser::parse: Parsing '{}'", raw_input);
     if (raw_input.is_empty())
         return base_url.has_value() ? *base_url : URL {};
-
-    if (raw_input.starts_with("data:"sv)) {
-        auto maybe_url = parse_data_url(raw_input);
-        if (!maybe_url.has_value())
-            return {};
-        return maybe_url.release_value();
-    }
 
     size_t start_index = 0;
     size_t end_index = raw_input.length();
@@ -863,7 +838,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                         return *url;
 
                     // 4. If url’s scheme is "file" and its host is an empty host, then return.
-                    if (url->scheme() == "file"sv && url->host().is_empty())
+                    if (url->scheme() == "file"sv && url->host() == String {})
                         return *url;
                 }
 
@@ -1302,7 +1277,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
             url->m_scheme = "file";
 
             // 2. Set url’s host to the empty string.
-            url->m_host = "";
+            url->m_host = String {};
 
             // 3. If c is U+002F (/) or U+005C (\), then:
             if (code_point == '/' || code_point == '\\') {
@@ -1405,7 +1380,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                 // 2. Otherwise, if buffer is the empty string, then:
                 else if (buffer.is_empty()) {
                     // 1. Set url’s host to the empty string.
-                    url->m_host = "";
+                    url->m_host = String {};
 
                     // 2. If state override is given, then return.
                     if (state_override.has_value())
@@ -1425,8 +1400,8 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                         return {};
 
                     // 3. If host is "localhost", then set host to the empty string.
-                    if (host.value() == "localhost")
-                        host = "";
+                    if (host.value().has<String>() && host.value().get<String>() == "localhost"sv)
+                        host = String {};
 
                     // 4. Set url’s host to host.
                     url->m_host = host.release_value();
@@ -1481,7 +1456,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                     continue;
             }
             // 5. Otherwise, if state override is given and url’s host is null, append the empty string to url’s path.
-            else if (state_override.has_value() && url->host().is_empty()) {
+            else if (state_override.has_value() && url->host().has<Empty>()) {
                 url->append_slash();
             }
             break;
@@ -1557,13 +1532,13 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
         // -> opaque path state, https://url.spec.whatwg.org/#cannot-be-a-base-url-path-state
         case State::CannotBeABaseUrlPath:
             // NOTE: This does not follow the spec exactly but rather uses the buffer and only sets the path on EOF.
-            // NOTE: Verify that the assumptions required for this simplification are correct.
             VERIFY(url->m_paths.size() == 1 && url->m_paths[0].is_empty());
 
             // 1. If c is U+003F (?), then set url’s query to the empty string and state to query state.
             if (code_point == '?') {
                 url->m_paths[0] = buffer.string_view();
                 url->m_query = "";
+                buffer.clear();
                 state = State::Query;
             }
             // 2. Otherwise, if c is U+0023 (#), then set url’s fragment to the empty string and state to fragment state.
@@ -1571,6 +1546,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                 // NOTE: This needs to be percent decoded since the member variables contain decoded data.
                 url->m_paths[0] = buffer.string_view();
                 url->m_fragment = "";
+                buffer.clear();
                 state = State::Fragment;
             }
             // 3. Otherwise:
@@ -1586,6 +1562,7 @@ URL URLParser::basic_parse(StringView raw_input, Optional<URL> const& base_url, 
                     URL::append_percent_encoded_if_necessary(buffer, code_point, URL::PercentEncodeSet::C0Control);
                 } else {
                     url->m_paths[0] = buffer.string_view();
+                    buffer.clear();
                 }
             }
             break;

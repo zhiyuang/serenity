@@ -10,6 +10,8 @@
 #include <AK/IPv6Address.h>
 #include <AK/URLParser.h>
 #include <LibWeb/Bindings/Intrinsics.h>
+#include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/FileAPI/BlobURLStore.h>
 #include <LibWeb/URL/URL.h>
 
 namespace Web::URL {
@@ -94,6 +96,38 @@ void URL::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_query.ptr());
+}
+
+// https://w3c.github.io/FileAPI/#dfn-createObjectURL
+WebIDL::ExceptionOr<String> URL::create_object_url(JS::VM& vm, JS::NonnullGCPtr<FileAPI::Blob> object)
+{
+    // The createObjectURL(obj) static method must return the result of adding an entry to the blob URL store for obj.
+    return TRY_OR_THROW_OOM(vm, FileAPI::add_entry_to_blob_url_store(object));
+}
+
+// https://w3c.github.io/FileAPI/#dfn-revokeObjectURL
+WebIDL::ExceptionOr<void> URL::revoke_object_url(JS::VM& vm, StringView url)
+{
+    // 1. Let url record be the result of parsing url.
+    auto url_record = parse(url);
+
+    // 2. If url record’s scheme is not "blob", return.
+    if (url_record.scheme() != "blob"sv)
+        return {};
+
+    // 3. Let origin be the origin of url record.
+    auto origin = url_origin(url_record);
+
+    // 4. Let settings be the current settings object.
+    auto& settings = HTML::current_settings_object();
+
+    // 5. If origin is not same origin with settings’s origin, return.
+    if (!origin.is_same_origin(settings.origin()))
+        return {};
+
+    // 6. Remove an entry from the Blob URL Store for url.
+    TRY_OR_THROW_OOM(vm, FileAPI::remove_entry_from_blob_url_store(url));
+    return {};
 }
 
 // https://url.spec.whatwg.org/#dom-url-canparse
@@ -235,15 +269,15 @@ WebIDL::ExceptionOr<String> URL::host() const
     auto& url = m_url;
 
     // 2. If url’s host is null, then return the empty string.
-    if (url.host().is_null())
+    if (url.host().has<Empty>())
         return String {};
 
     // 3. If url’s port is null, return url’s host, serialized.
     if (!url.port().has_value())
-        return TRY_OR_THROW_OOM(vm, String::from_deprecated_string(url.host()));
+        return TRY_OR_THROW_OOM(vm, url.serialized_host());
 
     // 4. Return url’s host, serialized, followed by U+003A (:) and url’s port, serialized.
-    return TRY_OR_THROW_OOM(vm, String::formatted("{}:{}", url.host(), *url.port()));
+    return TRY_OR_THROW_OOM(vm, String::formatted("{}:{}", TRY_OR_THROW_OOM(vm, url.serialized_host()), *url.port()));
 }
 
 // https://url.spec.whatwg.org/#dom-url-hostref-for-dom-url-host%E2%91%A0
@@ -265,11 +299,11 @@ WebIDL::ExceptionOr<String> URL::hostname() const
     auto& vm = realm().vm();
 
     // 1. If this’s URL’s host is null, then return the empty string.
-    if (m_url.host().is_null())
+    if (m_url.host().has<Empty>())
         return String {};
 
     // 2. Return this’s URL’s host, serialized.
-    return TRY_OR_THROW_OOM(vm, String::from_deprecated_string(m_url.host()));
+    return TRY_OR_THROW_OOM(vm, m_url.serialized_host());
 }
 
 // https://url.spec.whatwg.org/#ref-for-dom-url-hostname①
@@ -455,7 +489,24 @@ HTML::Origin url_origin(AK::URL const& url)
     // The origin of a URL url is the origin returned by running these steps, switching on url’s scheme:
     // -> "blob"
     if (url.scheme() == "blob"sv) {
-        // FIXME: Support 'blob://' URLs
+        auto url_string = url.to_string().release_value_but_fixme_should_propagate_errors();
+
+        // 1. If url’s blob URL entry is non-null, then return url’s blob URL entry’s environment’s origin.
+        if (auto blob_url_entry = FileAPI::blob_url_store().get(url_string); blob_url_entry.has_value())
+            return blob_url_entry->environment->origin();
+
+        // 2. Let pathURL be the result of parsing the result of URL path serializing url.
+        auto path_url = parse(url.serialize_path());
+
+        // 3. If pathURL is failure, then return a new opaque origin.
+        if (!path_url.is_valid())
+            return HTML::Origin {};
+
+        // 4. If pathURL’s scheme is "http", "https", or "file", then return pathURL’s origin.
+        if (path_url.scheme().is_one_of("http"sv, "https"sv, "file"sv))
+            return url_origin(path_url);
+
+        // 5. Return a new opaque origin.
         return HTML::Origin {};
     }
 
@@ -473,7 +524,7 @@ HTML::Origin url_origin(AK::URL const& url)
     if (url.scheme() == "file"sv) {
         // Unfortunate as it is, this is left as an exercise to the reader. When in doubt, return a new opaque origin.
         // Note: We must return an origin with the `file://' protocol for `file://' iframes to work from `file://' pages.
-        return HTML::Origin(url.scheme(), DeprecatedString(), 0);
+        return HTML::Origin(url.scheme(), String {}, 0);
     }
 
     // -> Otherwise
@@ -482,12 +533,10 @@ HTML::Origin url_origin(AK::URL const& url)
 }
 
 // https://url.spec.whatwg.org/#concept-domain
-bool host_is_domain(StringView host)
+bool host_is_domain(AK::URL::Host const& host)
 {
     // A domain is a non-empty ASCII string that identifies a realm within a network.
-    return !host.is_empty()
-        && !IPv4Address::from_string(host).has_value()
-        && !IPv6Address::from_string(host).has_value();
+    return host.has<String>() && host.get<String>() != String {};
 }
 
 // https://url.spec.whatwg.org/#concept-url-parser

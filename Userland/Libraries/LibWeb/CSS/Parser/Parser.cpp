@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/CSSKeyframeRule.h>
 #include <LibWeb/CSS/CSSKeyframesRule.h>
 #include <LibWeb/CSS/CSSMediaRule.h>
+#include <LibWeb/CSS/CSSNamespaceRule.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSStyleRule.h>
 #include <LibWeb/CSS/CSSStyleSheet.h>
@@ -464,6 +465,8 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
 
         if (pseudo_name.equals_ignoring_ascii_case("active"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Active);
+        if (pseudo_name.equals_ignoring_ascii_case("buffering"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Buffering);
         if (pseudo_name.equals_ignoring_ascii_case("checked"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Checked);
         if (pseudo_name.equals_ignoring_ascii_case("indeterminate"sv))
@@ -492,16 +495,28 @@ Parser::ParseErrorOr<Selector::SimpleSelector> Parser::parse_pseudo_simple_selec
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::LastOfType);
         if (pseudo_name.equals_ignoring_ascii_case("link"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Link);
+        if (pseudo_name.equals_ignoring_ascii_case("muted"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Muted);
         if (pseudo_name.equals_ignoring_ascii_case("only-child"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::OnlyChild);
         if (pseudo_name.equals_ignoring_ascii_case("only-of-type"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::OnlyOfType);
+        if (pseudo_name.equals_ignoring_ascii_case("playing"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Playing);
+        if (pseudo_name.equals_ignoring_ascii_case("paused"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Paused);
         if (pseudo_name.equals_ignoring_ascii_case("root"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Root);
+        if (pseudo_name.equals_ignoring_ascii_case("seeking"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Seeking);
+        if (pseudo_name.equals_ignoring_ascii_case("stalled"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Stalled);
         if (pseudo_name.equals_ignoring_ascii_case("host"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Host);
         if (pseudo_name.equals_ignoring_ascii_case("visited"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Visited);
+        if (pseudo_name.equals_ignoring_ascii_case("volume-locked"sv))
+            return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::VolumeLocked);
         if (pseudo_name.equals_ignoring_ascii_case("scope"sv))
             return make_pseudo_class_selector(Selector::SimpleSelector::PseudoClass::Type::Scope);
 
@@ -2289,34 +2304,15 @@ ElementInlineCSSStyleDeclaration* Parser::parse_as_style_attribute(DOM::Element&
     return ElementInlineCSSStyleDeclaration::create(element, move(properties), move(custom_properties)).release_value_but_fixme_should_propagate_errors();
 }
 
-Optional<AK::URL> Parser::parse_url_function(ComponentValue const& component_value, AllowedDataUrlType allowed_data_url_type)
+Optional<AK::URL> Parser::parse_url_function(ComponentValue const& component_value)
 {
     // FIXME: Handle list of media queries. https://www.w3.org/TR/css-cascade-3/#conditional-import
-    // FIXME: Handle data: urls (RFC2397)
 
     auto convert_string_to_url = [&](StringView& url_string) -> Optional<AK::URL> {
-        if (url_string.starts_with("data:"sv, CaseSensitivity::CaseInsensitive)) {
-            auto data_url = AK::URL(url_string);
-
-            switch (allowed_data_url_type) {
-            case AllowedDataUrlType::Image:
-                if (data_url.data_mime_type().starts_with("image"sv, CaseSensitivity::CaseInsensitive))
-                    return data_url;
-                break;
-            case AllowedDataUrlType::Font:
-                if (data_url.data_mime_type().starts_with("font"sv, CaseSensitivity::CaseInsensitive))
-                    return data_url;
-                if (data_url.data_mime_type().starts_with("application/font"sv, CaseSensitivity::CaseInsensitive))
-                    return data_url;
-                break;
-            default:
-                break;
-            }
-
-            return {};
-        }
-
-        return m_context.complete_url(url_string);
+        auto url = m_context.complete_url(url_string);
+        if (url.is_valid())
+            return url;
+        return {};
     };
 
     if (component_value.is(Token::Type::Url)) {
@@ -2341,9 +2337,9 @@ Optional<AK::URL> Parser::parse_url_function(ComponentValue const& component_val
     return {};
 }
 
-ErrorOr<RefPtr<StyleValue>> Parser::parse_url_value(ComponentValue const& component_value, AllowedDataUrlType allowed_data_url_type)
+ErrorOr<RefPtr<StyleValue>> Parser::parse_url_value(ComponentValue const& component_value)
 {
-    auto url = parse_url_function(component_value, allowed_data_url_type);
+    auto url = parse_url_function(component_value);
     if (!url.has_value())
         return nullptr;
     return URLStyleValue::create(*url);
@@ -3240,6 +3236,37 @@ CSSRule* Parser::convert_to_rule(NonnullRefPtr<Rule> rule)
             }
 
             return CSSKeyframesRule::create(m_context.realm(), name, move(keyframes)).release_value_but_fixme_should_propagate_errors();
+        }
+        if (rule->at_rule_name().equals_ignoring_ascii_case("namespace"sv)) {
+            // https://drafts.csswg.org/css-namespaces/#syntax
+            auto token_stream = TokenStream { rule->prelude() };
+            token_stream.skip_whitespace();
+
+            auto token = token_stream.next_token();
+            Optional<StringView> prefix = {};
+            if (token.is(Token::Type::Ident)) {
+                prefix = token.token().ident();
+                token_stream.skip_whitespace();
+                token = token_stream.next_token();
+            }
+
+            DeprecatedString namespace_uri;
+            if (token.is(Token::Type::String)) {
+                namespace_uri = token.token().string();
+            } else if (auto url = parse_url_function(token); url.has_value()) {
+                namespace_uri = url.value().to_deprecated_string();
+            } else {
+                dbgln_if(CSS_PARSER_DEBUG, "CSSParser: @namespace rule invalid; discarding.");
+                return {};
+            }
+
+            token_stream.skip_whitespace();
+            if (token_stream.has_next_token()) {
+                dbgln_if(CSS_PARSER_DEBUG, "CSSParser: @namespace rule invalid; discarding.");
+                return {};
+            }
+
+            return CSSNamespaceRule::create(m_context.realm(), prefix, namespace_uri).release_value_but_fixme_should_propagate_errors();
         }
 
         // FIXME: More at rules!
@@ -4232,7 +4259,7 @@ ErrorOr<RefPtr<StyleValue>> Parser::parse_string_value(ComponentValue const& com
 
 ErrorOr<RefPtr<StyleValue>> Parser::parse_image_value(ComponentValue const& component_value)
 {
-    auto url = parse_url_function(component_value, AllowedDataUrlType::Image);
+    auto url = parse_url_function(component_value);
     if (url.has_value())
         return ImageStyleValue::create(url.value());
     auto linear_gradient = TRY(parse_linear_gradient_function(component_value));
@@ -4249,30 +4276,43 @@ ErrorOr<RefPtr<StyleValue>> Parser::parse_paint_value(TokenStream<ComponentValue
 {
     // `<paint> = none | <color> | <url> [none | <color>]? | context-fill | context-stroke`
 
-    if (auto color = TRY(parse_color_value(tokens.peek_token()))) {
-        (void)tokens.next_token();
-        return color;
-    }
+    auto parse_color_or_none = [&]() -> ErrorOr<Optional<RefPtr<StyleValue>>> {
+        if (auto color = TRY(parse_color_value(tokens.peek_token()))) {
+            (void)tokens.next_token();
+            return color;
+        }
 
-    if (auto url = TRY(parse_url_value(tokens.peek_token(), AllowedDataUrlType::Image))) {
-        // FIXME: Accept `[none | <color>]?`
-        (void)tokens.next_token();
-        return url;
-    }
-
-    // NOTE: <color> also accepts identifiers, so we do this identifier check last.
-    if (tokens.peek_token().is(Token::Type::Ident)) {
-        auto maybe_ident = value_id_from_string(tokens.peek_token().token().ident());
-        if (maybe_ident.has_value()) {
-            // FIXME: Accept `context-fill` and `context-stroke`
-            switch (*maybe_ident) {
-            case ValueID::None:
-                (void)tokens.next_token();
-                return IdentifierStyleValue::create(*maybe_ident);
-            default:
-                return nullptr;
+        // NOTE: <color> also accepts identifiers, so we do this identifier check last.
+        if (tokens.peek_token().is(Token::Type::Ident)) {
+            auto maybe_ident = value_id_from_string(tokens.peek_token().token().ident());
+            if (maybe_ident.has_value()) {
+                // FIXME: Accept `context-fill` and `context-stroke`
+                switch (*maybe_ident) {
+                case ValueID::None:
+                    (void)tokens.next_token();
+                    return IdentifierStyleValue::create(*maybe_ident);
+                default:
+                    return nullptr;
+                }
             }
         }
+
+        return OptionalNone {};
+    };
+
+    // FIMXE: Allow context-fill/context-stroke here
+    if (auto color_or_none = TRY(parse_color_or_none()); color_or_none.has_value())
+        return *color_or_none;
+
+    if (auto url = TRY(parse_url_value(tokens.peek_token()))) {
+        (void)tokens.next_token();
+        tokens.skip_whitespace();
+        if (auto color_or_none = TRY(parse_color_or_none()); color_or_none == nullptr) {
+            // Fail to parse if the fallback is invalid, but otherwise ignore it.
+            // FIXME: Use fallback color
+            return nullptr;
+        }
+        return url;
     }
 
     return nullptr;
@@ -6058,7 +6098,7 @@ Vector<FontFace::Source> Parser::parse_font_face_src(TokenStream<ComponentValue>
 
         // <url> [ format(<font-format>)]?
         // FIXME: Implement optional tech() function from CSS-Fonts-4.
-        if (auto maybe_url = parse_url_function(first, AllowedDataUrlType::Font); maybe_url.has_value()) {
+        if (auto maybe_url = parse_url_function(first); maybe_url.has_value()) {
             auto url = maybe_url.release_value();
             if (!url.is_valid()) {
                 continue;
@@ -7791,40 +7831,41 @@ ErrorOr<Parser::PropertyAndValue> Parser::parse_css_value_for_properties(Readonl
         if (auto maybe_dynamic = TRY(parse_dynamic_value(peek_token)); maybe_dynamic && maybe_dynamic->is_calculated()) {
             (void)tokens.next_token();
             auto& calculated = maybe_dynamic->as_calculated();
-            if (calculated.resolves_to_angle_percentage()) {
-                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Angle); property.has_value())
+            // This is a bit sensitive to ordering: `<foo>` and `<percentage>` have to be checked before `<foo-percentage>`.
+            if (calculated.resolves_to_percentage()) {
+                if (auto property = any_property_accepts_type(property_ids, ValueType::Percentage); property.has_value())
                     return PropertyAndValue { *property, calculated };
             } else if (calculated.resolves_to_angle()) {
                 if (auto property = any_property_accepts_type(property_ids, ValueType::Angle); property.has_value())
                     return PropertyAndValue { *property, calculated };
-            } else if (calculated.resolves_to_frequency_percentage()) {
-                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Frequency); property.has_value())
+            } else if (calculated.resolves_to_angle_percentage()) {
+                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Angle); property.has_value())
                     return PropertyAndValue { *property, calculated };
             } else if (calculated.resolves_to_frequency()) {
                 if (auto property = any_property_accepts_type(property_ids, ValueType::Frequency); property.has_value())
                     return PropertyAndValue { *property, calculated };
-            } else if (calculated.resolves_to_number_percentage()) {
-                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Number); property.has_value())
+            } else if (calculated.resolves_to_frequency_percentage()) {
+                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Frequency); property.has_value())
                     return PropertyAndValue { *property, calculated };
             } else if (calculated.resolves_to_number()) {
                 if (property_accepts_numeric) {
                     auto property_or_resolved = property_accepting_integer.value_or_lazy_evaluated([property_accepting_number]() { return property_accepting_number.value(); });
                     return PropertyAndValue { property_or_resolved, calculated };
                 }
-            } else if (calculated.resolves_to_length_percentage()) {
-                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Length); property.has_value())
+            } else if (calculated.resolves_to_number_percentage()) {
+                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Number); property.has_value())
                     return PropertyAndValue { *property, calculated };
             } else if (calculated.resolves_to_length()) {
                 if (auto property = any_property_accepts_type(property_ids, ValueType::Length); property.has_value())
                     return PropertyAndValue { *property, calculated };
-            } else if (calculated.resolves_to_time_percentage()) {
-                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Time); property.has_value())
+            } else if (calculated.resolves_to_length_percentage()) {
+                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Length); property.has_value())
                     return PropertyAndValue { *property, calculated };
             } else if (calculated.resolves_to_time()) {
                 if (auto property = any_property_accepts_type(property_ids, ValueType::Time); property.has_value())
                     return PropertyAndValue { *property, calculated };
-            } else if (calculated.resolves_to_percentage()) {
-                if (auto property = any_property_accepts_type(property_ids, ValueType::Percentage); property.has_value())
+            } else if (calculated.resolves_to_time_percentage()) {
+                if (auto property = any_property_accepts_type_percentage(property_ids, ValueType::Time); property.has_value())
                     return PropertyAndValue { *property, calculated };
             }
         }

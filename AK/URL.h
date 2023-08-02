@@ -54,6 +54,22 @@ public:
     {
     }
 
+    // https://url.spec.whatwg.org/#concept-ipv4
+    // An IPv4 address is a 32-bit unsigned integer that identifies a network address. [RFC791]
+    // FIXME: It would be nice if this were an AK::IPv4Address
+    using IPv4Address = u32;
+
+    // https://url.spec.whatwg.org/#concept-ipv6
+    // An IPv6 address is a 128-bit unsigned integer that identifies a network address. For the purposes of this standard
+    // it is represented as a list of eight 16-bit unsigned integers, also known as IPv6 pieces. [RFC4291]
+    // FIXME: It would be nice if this were an AK::IPv6Address
+    using IPv6Address = Array<u16, 8>;
+
+    // https://url.spec.whatwg.org/#concept-host
+    // A host is a domain, an IP address, an opaque host, or an empty host. Typically a host serves as a network address,
+    // but it is sometimes used as opaque identifier in URLs where a network address is not necessary.
+    using Host = Variant<IPv4Address, IPv6Address, String, Empty>;
+
     bool is_valid() const { return m_valid; }
 
     enum class ApplyPercentDecoding {
@@ -63,7 +79,8 @@ public:
     DeprecatedString const& scheme() const { return m_scheme; }
     DeprecatedString username(ApplyPercentDecoding = ApplyPercentDecoding::Yes) const;
     DeprecatedString password(ApplyPercentDecoding = ApplyPercentDecoding::Yes) const;
-    DeprecatedString const& host() const { return m_host; }
+    Host const& host() const { return m_host; }
+    ErrorOr<String> serialized_host() const;
     DeprecatedString basename(ApplyPercentDecoding = ApplyPercentDecoding::Yes) const;
     DeprecatedString query(ApplyPercentDecoding = ApplyPercentDecoding::No) const;
     DeprecatedString fragment(ApplyPercentDecoding = ApplyPercentDecoding::Yes) const;
@@ -73,7 +90,7 @@ public:
 
     u16 port_or_default() const { return m_port.value_or(default_port_for_scheme(m_scheme)); }
     bool cannot_be_a_base_url() const { return m_cannot_be_a_base_url; }
-    bool cannot_have_a_username_or_password_or_port() const { return m_host.is_null() || m_host.is_empty() || m_cannot_be_a_base_url || m_scheme == "file"sv; }
+    bool cannot_have_a_username_or_password_or_port() const;
 
     bool includes_credentials() const { return !m_username.is_empty() || !m_password.is_empty(); }
     bool is_special() const { return is_special_scheme(m_scheme); }
@@ -85,7 +102,7 @@ public:
     void set_scheme(DeprecatedString);
     void set_username(DeprecatedString, ApplyPercentEncoding = ApplyPercentEncoding::Yes);
     void set_password(DeprecatedString, ApplyPercentEncoding = ApplyPercentEncoding::Yes);
-    void set_host(DeprecatedString);
+    void set_host(Host);
     void set_port(Optional<u16>);
     void set_paths(Vector<DeprecatedString>, ApplyPercentEncoding = ApplyPercentEncoding::Yes);
     void set_query(DeprecatedString, ApplyPercentEncoding = ApplyPercentEncoding::Yes);
@@ -111,14 +128,16 @@ public:
 
     URL complete_url(StringView) const;
 
-    bool data_payload_is_base64() const { return m_data_payload_is_base64; }
-    DeprecatedString const& data_mime_type() const { return m_data_mime_type; }
-    DeprecatedString const& data_payload() const { return m_data_payload; }
+    struct DataURL {
+        String mime_type;
+        ByteBuffer body;
+    };
+    ErrorOr<DataURL> process_data_url() const;
 
     static URL create_with_url_or_path(DeprecatedString const&);
     static URL create_with_file_scheme(DeprecatedString const& path, DeprecatedString const& fragment = {}, DeprecatedString const& hostname = {});
     static URL create_with_help_scheme(DeprecatedString const& path, DeprecatedString const& fragment = {}, DeprecatedString const& hostname = {});
-    static URL create_with_data(DeprecatedString mime_type, DeprecatedString payload, bool is_base64 = false) { return URL(move(mime_type), move(payload), is_base64); }
+    static URL create_with_data(StringView mime_type, StringView payload, bool is_base64 = false);
 
     static u16 default_port_for_scheme(StringView);
     static bool is_special_scheme(StringView);
@@ -135,17 +154,7 @@ public:
     static bool code_point_is_in_percent_encode_set(u32 code_point, URL::PercentEncodeSet);
 
 private:
-    URL(DeprecatedString&& data_mime_type, DeprecatedString&& data_payload, bool payload_is_base64)
-        : m_valid(true)
-        , m_scheme("data")
-        , m_data_payload_is_base64(payload_is_base64)
-        , m_data_mime_type(move(data_mime_type))
-        , m_data_payload(move(data_payload))
-    {
-    }
-
     bool compute_validity() const;
-    DeprecatedString serialize_data_url() const;
 
     static void append_percent_encoded_if_necessary(StringBuilder&, u32 code_point, PercentEncodeSet set = PercentEncodeSet::Userinfo);
     static void append_percent_encoded(StringBuilder&, u32 code_point);
@@ -162,7 +171,7 @@ private:
     DeprecatedString m_password;
 
     // A URL’s host is null or a host. It is initially null.
-    DeprecatedString m_host;
+    Host m_host;
 
     // A URL’s port is either null or a 16-bit unsigned integer that identifies a networking port. It is initially null.
     Optional<u16> m_port;
@@ -179,10 +188,6 @@ private:
     DeprecatedString m_fragment;
 
     bool m_cannot_be_a_base_url { false };
-
-    bool m_data_payload_is_base64 { false };
-    DeprecatedString m_data_mime_type;
-    DeprecatedString m_data_payload;
 };
 
 template<>

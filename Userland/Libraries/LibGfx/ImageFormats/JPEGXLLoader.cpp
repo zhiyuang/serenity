@@ -363,11 +363,22 @@ static ErrorOr<ExtraChannelInfo> read_extra_channel_info(LittleEndianInputBitStr
 }
 
 struct ToneMapping {
+    float intensity_target { 255 };
+    float min_nits { 0 };
+    bool relative_to_max_display { false };
+    float linear_below { 0 };
 };
 
-static ErrorOr<ToneMapping> read_tone_mapping(LittleEndianInputBitStream&)
+static ErrorOr<ToneMapping> read_tone_mapping(LittleEndianInputBitStream& stream)
 {
-    TODO();
+    ToneMapping tone_mapping;
+    bool const all_default = TRY(stream.read_bit());
+
+    if (!all_default) {
+        TODO();
+    }
+
+    return tone_mapping;
 }
 
 struct OpsinInverseMatrix {
@@ -398,6 +409,28 @@ struct ImageMetadata {
     Array<double, 15> up2_weight = s_d_up2;
     Array<double, 55> up4_weight = s_d_up4;
     Array<double, 210> up8_weight = s_d_up8;
+
+    u16 number_of_color_channels() const
+    {
+        if (!xyb_encoded && colour_encoding.colour_space == ColourEncoding::ColourSpace::kGrey)
+            return 1;
+        return 3;
+    }
+
+    u16 number_of_channels() const
+    {
+        return number_of_color_channels() + num_extra_channels;
+    }
+
+    Optional<u16> alpha_channel() const
+    {
+        for (u16 i = 0; i < ec_info.size(); ++i) {
+            if (ec_info[i].type == ExtraChannelInfo::ExtraChannelType::kAlpha)
+                return i + number_of_color_channels();
+        }
+
+        return OptionalNone {};
+    }
 };
 
 static ErrorOr<ImageMetadata> read_metadata_header(LittleEndianInputBitStream& stream)
@@ -1169,27 +1202,33 @@ private:
 
 class Image {
 public:
-    static ErrorOr<Image> create(IntSize size)
+    static ErrorOr<Image> create(IntSize size, ImageMetadata const& metadata)
     {
         Image image {};
 
-        // FIXME: Don't assume three channels and a fixed size
-        TRY(image.m_channels.try_append(TRY(Channel::create(size.width(), size.height()))));
-        TRY(image.m_channels.try_append(TRY(Channel::create(size.width(), size.height()))));
-        TRY(image.m_channels.try_append(TRY(Channel::create(size.width(), size.height()))));
+        for (u16 i = 0; i < metadata.number_of_channels(); ++i) {
+            if (i < metadata.number_of_color_channels()) {
+                TRY(image.m_channels.try_append(TRY(Channel::create(size.width(), size.height()))));
+            } else {
+                auto const dim_shift = metadata.ec_info[i - metadata.number_of_color_channels()].dim_shift;
+                TRY(image.m_channels.try_append(TRY(Channel::create(size.width() >> dim_shift, size.height() >> dim_shift))));
+            }
+        }
 
         return image;
     }
 
-    ErrorOr<NonnullRefPtr<Bitmap>> to_bitmap(u8 bits_per_sample) const
+    ErrorOr<NonnullRefPtr<Bitmap>> to_bitmap(ImageMetadata& metadata) const
     {
         // FIXME: which channel size should we use?
         auto const width = m_channels[0].width();
         auto const height = m_channels[0].height();
 
-        auto bitmap = TRY(Bitmap::create(BitmapFormat::BGRx8888, { width, height }));
+        auto bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, { width, height }));
 
-        // FIXME: This assumes a raw image with RGB channels, other cases are possible
+        auto const alpha_channel = metadata.alpha_channel();
+
+        auto const bits_per_sample = metadata.bit_depth.bits_per_sample;
         VERIFY(bits_per_sample >= 8);
         for (u32 y {}; y < height; ++y) {
             for (u32 x {}; x < width; ++x) {
@@ -1202,11 +1241,20 @@ public:
                     return clamp(sample + .5, 0, (1 << maximum_supported_bit_depth) - 1);
                 };
 
-                Color const color {
-                    to_u8(m_channels[0].get(x, y)),
-                    to_u8(m_channels[1].get(x, y)),
-                    to_u8(m_channels[2].get(x, y)),
-                };
+                auto const color = [&]() -> Color {
+                    if (!alpha_channel.has_value()) {
+                        return { to_u8(m_channels[0].get(x, y)),
+                            to_u8(m_channels[1].get(x, y)),
+                            to_u8(m_channels[2].get(x, y)) };
+                    }
+
+                    return {
+                        to_u8(m_channels[0].get(x, y)),
+                        to_u8(m_channels[1].get(x, y)),
+                        to_u8(m_channels[2].get(x, y)),
+                        to_u8(m_channels[*alpha_channel].get(x, y)),
+                    };
+                }();
                 bitmap->set_pixel(x, y, color);
             }
         }
@@ -1255,12 +1303,15 @@ static ErrorOr<Vector<i32>> get_properties(Vector<Channel> const& channels, u16 
     TRY(properties.try_append(W));
 
     // x > 0 ? W - /* (the value of property 9 at position (x - 1, y)) */ : W
-    i32 x_1 = x - 1;
-    i32 const W_x_1 = x_1 > 0 ? channels[i].get(x_1 - 1, y) : (x_1 >= 0 && y > 0 ? channels[i].get(x_1, y - 1) : 0);
-    i32 const N_x_1 = x_1 >= 0 && y > 0 ? channels[i].get(x_1, y - 1) : W_x_1;
-    i32 const NW_x_1 = x_1 > 0 && y > 0 ? channels[i].get(x_1 - 1, y - 1) : W_x_1;
-
-    TRY(properties.try_append(W_x_1 + N_x_1 - NW_x_1));
+    if (x > 0) {
+        auto const x_1 = x - 1;
+        i32 const W_x_1 = x_1 > 0 ? channels[i].get(x_1 - 1, y) : (y > 0 ? channels[i].get(x_1, y - 1) : 0);
+        i32 const N_x_1 = y > 0 ? channels[i].get(x_1, y - 1) : W_x_1;
+        i32 const NW_x_1 = x_1 > 0 && y > 0 ? channels[i].get(x_1 - 1, y - 1) : W_x_1;
+        TRY(properties.try_append(W - (W_x_1 + N_x_1 - NW_x_1)));
+    } else {
+        TRY(properties.try_append(W));
+    }
 
     TRY(properties.try_append(W + N - NW));
     TRY(properties.try_append(W - NW));
@@ -1629,7 +1680,7 @@ static ErrorOr<Frame> read_frame(LittleEndianInputBitStream& stream,
 
     frame.toc = TRY(read_toc(stream, frame.frame_header, frame.num_groups, frame.num_lf_groups));
 
-    image = TRY(Image::create({ frame.width, frame.height }));
+    image = TRY(Image::create({ frame.width, frame.height }, metadata));
 
     frame.lf_global = TRY(read_lf_global(stream, image, frame.frame_header, metadata, entropy_decoder));
 
@@ -1751,6 +1802,19 @@ static ErrorOr<void> apply_image_features(Image& image, ImageMetadata const& met
 }
 ///
 
+/// L.4 - Extra channel rendering
+static ErrorOr<void> render_extra_channels(Image&, ImageMetadata const& metadata)
+{
+    for (u16 i = metadata.number_of_color_channels(); i < metadata.number_of_channels(); ++i) {
+        auto const ec_index = i - metadata.number_of_color_channels();
+        if (metadata.ec_info[ec_index].dim_shift != 0)
+            TODO();
+    }
+
+    return {};
+}
+///
+
 class JPEGXLLoadingContext {
 public:
     JPEGXLLoadingContext(NonnullOwnPtr<Stream> stream)
@@ -1789,7 +1853,9 @@ public:
         if (m_metadata.xyb_encoded || frame.frame_header.do_YCbCr)
             TODO();
 
-        m_bitmap = TRY(image.to_bitmap(m_metadata.bit_depth.bits_per_sample));
+        TRY(render_extra_channels(image, m_metadata));
+
+        m_bitmap = TRY(image.to_bitmap(m_metadata));
 
         return {};
     }

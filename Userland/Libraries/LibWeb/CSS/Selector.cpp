@@ -227,9 +227,17 @@ ErrorOr<String> Selector::SimpleSelector::serialize() const
         case Selector::SimpleSelector::PseudoClass::Type::Disabled:
         case Selector::SimpleSelector::PseudoClass::Type::Enabled:
         case Selector::SimpleSelector::PseudoClass::Type::Checked:
+        case Selector::SimpleSelector::PseudoClass::Type::Indeterminate:
         case Selector::SimpleSelector::PseudoClass::Type::Active:
         case Selector::SimpleSelector::PseudoClass::Type::Scope:
         case Selector::SimpleSelector::PseudoClass::Type::Defined:
+        case Selector::SimpleSelector::PseudoClass::Type::Playing:
+        case Selector::SimpleSelector::PseudoClass::Type::Paused:
+        case Selector::SimpleSelector::PseudoClass::Type::Seeking:
+        case Selector::SimpleSelector::PseudoClass::Type::Muted:
+        case Selector::SimpleSelector::PseudoClass::Type::VolumeLocked:
+        case Selector::SimpleSelector::PseudoClass::Type::Buffering:
+        case Selector::SimpleSelector::PseudoClass::Type::Stalled:
             // If the pseudo-class does not accept arguments append ":" (U+003A), followed by the name of the pseudo-class, to s.
             TRY(s.try_append(':'));
             TRY(s.try_append(pseudo_class_name(pseudo_class.type)));
@@ -265,9 +273,6 @@ ErrorOr<String> Selector::SimpleSelector::serialize() const
             }
             TRY(s.try_append(')'));
             break;
-        default:
-            dbgln("FIXME: Unknown pseudo class type for serialization: {}", to_underlying(pseudo_class.type));
-            VERIFY_NOT_REACHED();
         }
         break;
     }

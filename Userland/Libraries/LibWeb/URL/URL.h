@@ -24,6 +24,9 @@ public:
 
     virtual ~URL() override;
 
+    static WebIDL::ExceptionOr<String> create_object_url(JS::VM&, JS::NonnullGCPtr<FileAPI::Blob> object);
+    static WebIDL::ExceptionOr<void> revoke_object_url(JS::VM&, StringView url);
+
     static bool can_parse(JS::VM&, String const& url, Optional<String> const& base = {});
 
     WebIDL::ExceptionOr<String> href() const;
@@ -75,7 +78,7 @@ private:
 };
 
 HTML::Origin url_origin(AK::URL const&);
-bool host_is_domain(StringView host);
+bool host_is_domain(AK::URL::Host const&);
 
 // https://url.spec.whatwg.org/#concept-url-parser
 AK::URL parse(StringView input, Optional<AK::URL> const& base_url = {});

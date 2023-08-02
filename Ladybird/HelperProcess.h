@@ -6,11 +6,19 @@
 
 #pragma once
 
+#include "Types.h"
 #include <AK/Error.h>
-#include <AK/Optional.h>
 #include <AK/Span.h>
 #include <AK/StringView.h>
-#include <LibCore/System.h>
+#include <LibProtocol/RequestClient.h>
+#include <LibWebView/ViewImplementation.h>
+#include <LibWebView/WebContentClient.h>
 
-ErrorOr<void> spawn_helper_process(StringView process_name, ReadonlySpan<StringView> arguments, Core::System::SearchInPath, Optional<ReadonlySpan<StringView>> environment = {});
-ErrorOr<Vector<String>> get_paths_for_helper_process(StringView process_name);
+ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_process(WebView::ViewImplementation& view,
+    ReadonlySpan<String> candidate_web_content_paths,
+    WebView::EnableCallgrindProfiling,
+    WebView::IsLayoutTestMode,
+    WebView::UseJavaScriptBytecode,
+    UseLagomNetworking);
+
+ErrorOr<NonnullRefPtr<Protocol::RequestClient>> launch_request_server_process(ReadonlySpan<String> candidate_request_server_paths);

@@ -108,6 +108,7 @@ public:
     static CSS::BorderCollapse border_collapse() { return CSS::BorderCollapse::Separate; }
     static Vector<Vector<String>> grid_template_areas() { return {}; }
     static CSS::Time transition_delay() { return CSS::Time::make_seconds(0); }
+    static CSS::ObjectFit object_fit() { return CSS::ObjectFit::Fill; }
 };
 
 enum class BackgroundSize {
@@ -157,7 +158,7 @@ struct BorderData {
 public:
     Color color { Color::Transparent };
     CSS::LineStyle line_style { CSS::LineStyle::None };
-    double width { 0 };
+    CSSPixels width { 0 };
 
     bool operator==(BorderData const&) const = default;
 };

@@ -28,7 +28,7 @@ ConsoleWidget::ConsoleWidget()
 {
     setLayout(new QVBoxLayout);
 
-    m_output_view = new WebContentView({}, WebView::EnableCallgrindProfiling::No, WebView::UseJavaScriptBytecode::No);
+    m_output_view = new WebContentView({}, WebView::EnableCallgrindProfiling::No, WebView::UseJavaScriptBytecode::No, UseLagomNetworking::No);
     if (is_using_dark_system_theme(*this))
         m_output_view->update_palette(WebContentView::PaletteMode::Dark);
 
@@ -175,6 +175,8 @@ void ConsoleInputEdit::keyPressEvent(QKeyEvent* event)
 {
     switch (event->key()) {
     case Qt::Key_Down: {
+        if (m_history.is_empty())
+            break;
         auto last_index = m_history.size() - 1;
         if (m_history_index < last_index) {
             m_history_index++;

@@ -115,6 +115,13 @@ public:
                 Lang,
                 Scope,
                 Defined,
+                Playing,
+                Paused,
+                Seeking,
+                Muted,
+                VolumeLocked,
+                Buffering,
+                Stalled,
             };
             Type type;
 
@@ -304,6 +311,20 @@ constexpr StringView pseudo_class_name(Selector::SimpleSelector::PseudoClass::Ty
         return "scope"sv;
     case Selector::SimpleSelector::PseudoClass::Type::Defined:
         return "defined"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Playing:
+        return "playing"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Paused:
+        return "paused"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Seeking:
+        return "seeking"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Muted:
+        return "muted"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::VolumeLocked:
+        return "volume-locked"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Buffering:
+        return "buffering"sv;
+    case Selector::SimpleSelector::PseudoClass::Type::Stalled:
+        return "stalled"sv;
     }
     VERIFY_NOT_REACHED();
 }

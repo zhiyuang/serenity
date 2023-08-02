@@ -12,7 +12,6 @@ moc_qt_objects("generate_moc") {
 link_qt("WebContent_qt") {
   qt_components = [
     "Core",
-    "Gui",
     "Network",
     "Multimedia",
   ]
@@ -36,8 +35,10 @@ executable("WebContent") {
     "//Userland/Libraries/LibIPC",
     "//Userland/Libraries/LibJS",
     "//Userland/Libraries/LibMain",
+    "//Userland/Libraries/LibProtocol",
     "//Userland/Libraries/LibWeb",
     "//Userland/Libraries/LibWebSocket",
+    "//Userland/Libraries/LibWebView",
     "//Userland/Libraries/LibWebView:WebContentClientEndpoint",
     "//Userland/Libraries/LibWebView:WebContentServerEndpoint",
     "//Userland/Libraries/LibWebView:WebDriverClientEndpoint",
@@ -47,7 +48,8 @@ executable("WebContent") {
     "../AudioCodecPluginLadybird.cpp",
     "../AudioThread.cpp",
     "../EventLoopImplementationQt.cpp",
-    "../FontPluginQt.cpp",
+    "../FontPluginLadybird.cpp",
+    "../HelperProcess.cpp",
     "../ImageCodecPluginLadybird.cpp",
     "../RequestManagerQt.cpp",
     "../Utilities.cpp",
@@ -62,9 +64,4 @@ executable("WebContent") {
     "main.cpp",
   ]
   sources += get_target_outputs(":generate_moc")
-
-  if (current_os == "mac") {
-    sources += [ "MacOSSetup.mm" ]
-    frameworks = [ "AppKit.framework" ]
-  }
 }

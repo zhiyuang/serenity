@@ -6,12 +6,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <AK/HashTable.h>
+#include <AK/StdLibExtras.h>
 #include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibJS/Forward.h>
 #include <LibJS/Runtime/BigInt.h>
-#include <LibJS/Runtime/BigIntObject.h>
 #include <LibJS/Runtime/BooleanObject.h>
 #include <LibJS/Runtime/Date.h>
 #include <LibJS/Runtime/NumberObject.h>
@@ -102,27 +101,24 @@ public:
         } else if (value.is_string()) {
             m_serialized.append(ValueTag::StringPrimitive);
             TRY(serialize_string(m_serialized, value.as_string()));
-        } else if (value.is_object()) {
-            auto& value_object = value.as_object();
-            if (is<JS::BooleanObject>(value_object)) {
-                m_serialized.append(ValueTag::BooleanObject);
-                auto& boolean_object = static_cast<JS::BooleanObject&>(value_object);
-                m_serialized.append(bit_cast<u32>(static_cast<u32>(boolean_object.boolean())));
-            } else if (is<JS::NumberObject>(value_object)) {
-                m_serialized.append(ValueTag::NumberObject);
-                auto& number_object = static_cast<JS::NumberObject&>(value_object);
-                double const number = number_object.number();
-                m_serialized.append(bit_cast<u32*>(&number), 2);
-            } else if (is<JS::StringObject>(value_object)) {
-                m_serialized.append(ValueTag::StringObject);
-                auto& string_object = static_cast<JS::StringObject&>(value_object);
-                TRY(serialize_string(m_serialized, string_object.primitive_string()));
-            } else if (is<JS::Date>(value_object)) {
-                m_serialized.append(ValueTag::DateObject);
-                auto& date_object = static_cast<JS::Date&>(value_object);
-                double const date_value = date_object.date_value();
-                m_serialized.append(bit_cast<u32*>(&date_value), 2);
-            }
+        } else if (value.is_object() && is<JS::BooleanObject>(value.as_object())) {
+            m_serialized.append(ValueTag::BooleanObject);
+            auto& boolean_object = static_cast<JS::BooleanObject&>(value.as_object());
+            m_serialized.append(bit_cast<u32>(static_cast<u32>(boolean_object.boolean())));
+        } else if (value.is_object() && is<JS::NumberObject>(value.as_object())) {
+            m_serialized.append(ValueTag::NumberObject);
+            auto& number_object = static_cast<JS::NumberObject&>(value.as_object());
+            double const number = number_object.number();
+            m_serialized.append(bit_cast<u32*>(&number), 2);
+        } else if (value.is_object() && is<JS::StringObject>(value.as_object())) {
+            m_serialized.append(ValueTag::StringObject);
+            auto& string_object = static_cast<JS::StringObject&>(value.as_object());
+            TRY(serialize_string(m_serialized, string_object.primitive_string()));
+        } else if (value.is_object() && is<JS::Date>(value.as_object())) {
+            m_serialized.append(ValueTag::DateObject);
+            auto& date_object = static_cast<JS::Date&>(value.as_object());
+            double const date_value = date_object.date_value();
+            m_serialized.append(bit_cast<u32*>(&date_value), 2);
         } else {
             // TODO: Define many more types
             m_error = "Unsupported type"sv;
@@ -148,12 +144,22 @@ private:
 
     WebIDL::ExceptionOr<void> serialize_string(Vector<u32>& vector, String const& string)
     {
-        u64 const size = string.code_points().length();
+        u64 const size = string.code_points().byte_length();
         // Append size of the string to the serialized structure.
         TRY_OR_THROW_OOM(m_vm, vector.try_append(bit_cast<u32*>(&size), 2));
-        for (auto code_point : string.code_points()) {
-            // Append each code point to the serialized structure.
-            TRY_OR_THROW_OOM(m_vm, vector.try_append(code_point));
+        // Append the bytes of the string to the serialized structure.
+        u64 byte_position = 0;
+        ReadonlyBytes const bytes = { string.code_points().bytes(), string.code_points().byte_length() };
+        while (byte_position < size) {
+            u32 combined_value = 0;
+            for (u8 i = 0; i < 4; ++i) {
+                u8 const byte = bytes[byte_position];
+                combined_value |= byte << (i * 8);
+                byte_position++;
+                if (byte_position == size)
+                    break;
+            }
+            TRY_OR_THROW_OOM(m_vm, vector.try_append(combined_value));
         }
         return {};
     }
@@ -271,11 +277,18 @@ private:
         size_bits[1] = vector[position++];
         u64 const size = *bit_cast<u64*>(&size_bits);
 
-        u8 bits[size];
-        for (u32 i = 0; i < size; ++i)
-            bits[i] = vector[position++];
-
-        ReadonlyBytes const bytes = { bits, size };
+        Vector<u8> bytes;
+        TRY_OR_THROW_OOM(vm, bytes.try_ensure_capacity(size));
+        u64 byte_position = 0;
+        while (position < vector.size()) {
+            for (u8 i = 0; i < 4; ++i) {
+                bytes.append(vector[position] >> (i * 8) & 0xFF);
+                byte_position++;
+                if (byte_position == size)
+                    break;
+            }
+            position++;
+        }
 
         return TRY(Bindings::throw_dom_exception_if_needed(vm, [&vm, &bytes]() {
             return JS::PrimitiveString::create(vm, StringView { bytes });

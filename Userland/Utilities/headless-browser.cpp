@@ -42,6 +42,7 @@
 
 #if !defined(AK_OS_SERENITY)
 #    include <Ladybird/HelperProcess.h>
+#    include <Ladybird/Utilities.h>
 #    include <QCoreApplication>
 #endif
 
@@ -57,7 +58,7 @@ public:
         (void)use_javascript_bytecode;
 #else
         auto candidate_web_content_paths = TRY(get_paths_for_helper_process("WebContent"sv));
-        view->m_client_state.client = TRY(view->launch_web_content_process(candidate_web_content_paths, WebView::EnableCallgrindProfiling::No, is_layout_test_mode, use_javascript_bytecode));
+        view->m_client_state.client = TRY(launch_web_content_process(*view, candidate_web_content_paths, WebView::EnableCallgrindProfiling::No, is_layout_test_mode, use_javascript_bytecode, UseLagomNetworking::No));
 #endif
 
         view->client().async_update_system_theme(move(theme));
@@ -240,7 +241,14 @@ static ErrorOr<TestResult> run_test(HeadlessWebContentView& view, StringView inp
     if (result.is_error())
         return result.release_error();
 
-    auto expectation_file = TRY(Core::File::open(expectation_path, Core::File::OpenMode::Read));
+    auto expectation_file_or_error = Core::File::open(expectation_path, Core::File::OpenMode::Read);
+    if (expectation_file_or_error.is_error()) {
+        warnln("Failed opening '{}': {}", expectation_path, expectation_file_or_error.error());
+        return expectation_file_or_error.release_error();
+    }
+
+    auto expectation_file = expectation_file_or_error.release_value();
+
     auto expectation = TRY(String::from_utf8(StringView(TRY(expectation_file->read_until_eof()).bytes())));
 
     auto actual = result.release_value();

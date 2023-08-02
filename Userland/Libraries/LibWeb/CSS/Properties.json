@@ -140,7 +140,7 @@
     "valid-types": [
       "ratio"
     ],
-    "valid-identifiers":[
+    "valid-identifiers": [
       "auto"
     ]
   },
@@ -1557,6 +1557,13 @@
     "percentages-resolve-to": "length",
     "quirks": [
       "unitless-length"
+    ]
+  },
+  "object-fit": {
+    "inherited": false,
+    "initial": "fill",
+    "valid-types": [
+      "object-fit"
     ]
   },
   "opacity": {

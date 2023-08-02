@@ -31,6 +31,8 @@
 #include <LibWeb/Fetch/Infrastructure/PortBlocking.h>
 #include <LibWeb/Fetch/Infrastructure/Task.h>
 #include <LibWeb/Fetch/Infrastructure/URL.h>
+#include <LibWeb/FileAPI/Blob.h>
+#include <LibWeb/FileAPI/BlobURLStore.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
@@ -393,13 +395,23 @@ WebIDL::ExceptionOr<Optional<JS::NonnullGCPtr<PendingResponse>>> main_fetch(JS::
             if (!response->is_network_error() && !is<Infrastructure::FilteredResponse>(*response)) {
                 // 1. If request’s response tainting is "cors", then:
                 if (request->response_tainting() == Infrastructure::Request::ResponseTainting::CORS) {
-                    // FIXME: 1. Let headerNames be the result of extracting header list values given
-                    //           `Access-Control-Expose-Headers` and response’s header list.
-                    // FIXME: 2. If request’s credentials mode is not "include" and headerNames contains `*`, then set
-                    //           response’s CORS-exposed header-name list to all unique header names in response’s header
-                    //           list.
-                    // FIXME: 3. Otherwise, if headerNames is not null or failure, then set response’s CORS-exposed
-                    //           header-name list to headerNames.
+                    // 1. Let headerNames be the result of extracting header list values given
+                    //    `Access-Control-Expose-Headers` and response’s header list.
+                    auto header_names_or_failure = TRY_OR_IGNORE(Infrastructure::extract_header_list_values("Access-Control-Expose-Headers"sv.bytes(), response->header_list()));
+                    auto header_names = header_names_or_failure.has<Vector<ByteBuffer>>() ? header_names_or_failure.get<Vector<ByteBuffer>>() : Vector<ByteBuffer> {};
+
+                    // 2. If request’s credentials mode is not "include" and headerNames contains `*`, then set
+                    //    response’s CORS-exposed header-name list to all unique header names in response’s header
+                    //    list.
+                    if (request->credentials_mode() != Infrastructure::Request::CredentialsMode::Include && header_names.contains_slow("*"sv.bytes())) {
+                        auto unique_header_names = TRY_OR_IGNORE(response->header_list()->unique_names());
+                        response->set_cors_exposed_header_name_list(move(unique_header_names));
+                    }
+                    // 3. Otherwise, if headerNames is not null or failure, then set response’s CORS-exposed
+                    //    header-name list to headerNames.
+                    else if (!header_names.is_empty()) {
+                        response->set_cors_exposed_header_name_list(move(header_names));
+                    }
                 }
 
                 // 2. Set response to the following filtered response with response as its internal response, depending
@@ -708,23 +720,96 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
     }
     // -> "blob"
     else if (request->current_url().scheme() == "blob"sv) {
-        // FIXME: Support 'blob://' URLs
-        return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request has 'blob:' URL which is currently unsupported"sv));
+        auto const& store = FileAPI::blob_url_store();
+
+        // 1. Let blobURLEntry be request’s current URL’s blob URL entry.
+        auto blob_url_entry = store.get(TRY_OR_THROW_OOM(vm, request->current_url().to_string()));
+
+        // 2. If request’s method is not `GET`, blobURLEntry is null, or blobURLEntry’s object is not a Blob object,
+        //    then return a network error. [FILEAPI]
+        if (request->method() != "GET"sv.bytes() || !blob_url_entry.has_value()) {
+            // FIXME: Handle "blobURLEntry’s object is not a Blob object". It could be a MediaSource object, but we
+            //        have not yet implemented the Media Source Extensions spec.
+            return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request has an invalid 'blob:' URL"sv));
+        }
+
+        // 3. Let blob be blobURLEntry’s object.
+        auto const& blob = blob_url_entry->object;
+
+        // 4. Let response be a new response.
+        auto response = Infrastructure::Response::create(vm);
+
+        // 5. Let fullLength be blob’s size.
+        auto full_length = blob->size();
+
+        // 6. Let serializedFullLength be fullLength, serialized and isomorphic encoded.
+        auto serialized_full_length = TRY_OR_THROW_OOM(vm, String::number(full_length));
+
+        // 7. Let type be blob’s type.
+        auto const& type = blob->type();
+
+        // 8. If request’s header list does not contain `Range`:
+        if (!request->header_list()->contains("Range"sv.bytes())) {
+            // 1. Let bodyWithType be the result of safely extracting blob.
+            auto body_with_type = TRY(safely_extract_body(realm, blob));
+
+            // 2. Set response’s status message to `OK`.
+            response->set_status_message(MUST(ByteBuffer::copy("OK"sv.bytes())));
+
+            // 3. Set response’s body to bodyWithType’s body.
+            response->set_body(move(body_with_type.body));
+
+            // 4. Set response’s header list to « (`Content-Length`, serializedFullLength), (`Content-Type`, type) ».
+            auto content_length_header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Content-Length"sv, serialized_full_length));
+            TRY_OR_THROW_OOM(vm, response->header_list()->append(move(content_length_header)));
+
+            auto content_type_header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Content-Type"sv, type));
+            TRY_OR_THROW_OOM(vm, response->header_list()->append(move(content_type_header)));
+        }
+        // FIXME: 9. Otherwise:
+        else {
+            // 1. Set response’s range-requested flag.
+            // 2. Let rangeHeader be the result of getting `Range` from request’s header list.
+            // 3. Let rangeValue be the result of parsing a single range header value given rangeHeader and true.
+            // 4. If rangeValue is failure, then return a network error.
+            // 5. Let (rangeStart, rangeEnd) be rangeValue.
+            // 6. If rangeStart is null:
+            //     1. Set rangeStart to fullLength − rangeEnd.
+            //     2. Set rangeEnd to rangeStart + rangeEnd − 1.
+            // 7. Otherwise:
+            //     1. If rangeStart is greater than or equal to fullLength, then return a network error.
+            //     2. If rangeEnd is null or rangeEnd is greater than or equal to fullLength, then set rangeEnd to fullLength − 1.
+            // 8. Let slicedBlob be the result of invoking slice blob given blob, rangeStart, rangeEnd + 1, and type.
+            // 9. Let slicedBodyWithType be the result of safely extracting slicedBlob.
+            // 10. Set response’s body to slicedBodyWithType’s body.
+            // 11. Let serializedSlicedLength be slicedBlob’s size, serialized and isomorphic encoded.
+            // 12. Let contentRange be `bytes `.
+            // 13. Append rangeStart, serialized and isomorphic encoded, to contentRange.
+            // 14. Append 0x2D (-) to contentRange.
+            // 15. Append rangeEnd, serialized and isomorphic encoded to contentRange.
+            // 16. Append 0x2F (/) to contentRange.
+            // 17. Append serializedFullLength to contentRange.
+            // 18. Set response’s status to 206.
+            // 19. Set response’s status message to `Partial Content`.
+            // 20. Set response’s header list to « (`Content-Length`, serializedSlicedLength), (`Content-Type`, type), (`Content-Range`, contentRange) ».
+            return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request has a 'blob:' URL with a Content-Range header, which is currently unsupported"sv));
+        }
+
+        // 10. Return response.
+        return PendingResponse::create(vm, request, response);
     }
     // -> "data"
     else if (request->current_url().scheme() == "data"sv) {
         // 1. Let dataURLStruct be the result of running the data: URL processor on request’s current URL.
-        auto const& url = request->current_url();
-        auto data_or_error = url.data_payload_is_base64()
-            ? decode_base64(url.data_payload())
-            : TRY_OR_THROW_OOM(vm, ByteBuffer::copy(url.data_payload().bytes()));
+        auto data_url_struct = request->current_url().process_data_url();
 
         // 2. If dataURLStruct is failure, then return a network error.
-        if (data_or_error.is_error())
-            return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Request has invalid base64 'data:' URL"sv));
+        if (data_url_struct.is_error())
+            return PendingResponse::create(vm, request, Infrastructure::Response::network_error(vm, "Failed to process 'data:' URL"sv));
 
         // 3. Let mimeType be dataURLStruct’s MIME type, serialized.
-        auto const& mime_type = url.data_mime_type();
+        //    FIXME: Serialize MIME type.
+        auto const& mime_type = data_url_struct.value().mime_type;
 
         // 4. Return a new response whose status message is `OK`, header list is « (`Content-Type`, mimeType) », and
         //    body is dataURLStruct’s body as a body.
@@ -732,7 +817,7 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> scheme_fetch(JS::Realm& r
         response->set_status_message(MUST(ByteBuffer::copy("OK"sv.bytes())));
         auto header = TRY_OR_THROW_OOM(vm, Infrastructure::Header::from_string_pair("Content-Type"sv, mime_type));
         TRY_OR_THROW_OOM(vm, response->header_list()->append(move(header)));
-        response->set_body(TRY(Infrastructure::byte_sequence_as_body(realm, data_or_error.value().span())));
+        response->set_body(TRY(Infrastructure::byte_sequence_as_body(realm, data_url_struct.value().body)));
         return PendingResponse::create(vm, request, response);
     }
     // -> "file"
@@ -1803,38 +1888,6 @@ WebIDL::ExceptionOr<JS::NonnullGCPtr<PendingResponse>> cors_preflight_fetch(JS::
 
             // NOTE: We treat "header_names_or_failure" being `Empty` as empty Vector here.
             auto header_names = header_names_or_failure.has<Vector<ByteBuffer>>() ? header_names_or_failure.get<Vector<ByteBuffer>>() : Vector<ByteBuffer> {};
-
-            // FIXME: Remove this once extract_header_list_values validates the header and returns multiple values.
-            if (!methods.is_empty()) {
-                VERIFY(methods.size() == 1);
-
-                auto split_methods = StringView { methods.first() }.split_view(',');
-                Vector<ByteBuffer> trimmed_methods;
-
-                for (auto const& method : split_methods) {
-                    auto trimmed_method = method.trim(" \t"sv);
-                    auto trimmed_method_as_byte_buffer = TRY_OR_IGNORE(ByteBuffer::copy(trimmed_method.bytes()));
-                    TRY_OR_IGNORE(trimmed_methods.try_append(move(trimmed_method_as_byte_buffer)));
-                }
-
-                methods = move(trimmed_methods);
-            }
-
-            // FIXME: Remove this once extract_header_list_values validates the header and returns multiple values.
-            if (!header_names.is_empty()) {
-                VERIFY(header_names.size() == 1);
-
-                auto split_header_names = StringView { header_names.first() }.split_view(',');
-                Vector<ByteBuffer> trimmed_header_names;
-
-                for (auto const& header_name : split_header_names) {
-                    auto trimmed_header_name = header_name.trim(" \t"sv);
-                    auto trimmed_header_name_as_byte_buffer = TRY_OR_IGNORE(ByteBuffer::copy(trimmed_header_name.bytes()));
-                    TRY_OR_IGNORE(trimmed_header_names.try_append(move(trimmed_header_name_as_byte_buffer)));
-                }
-
-                header_names = move(trimmed_header_names);
-            }
 
             // 4. If methods is null and request’s use-CORS-preflight flag is set, then set methods to a new list containing request’s method.
             // NOTE: This ensures that a CORS-preflight fetch that happened due to request’s use-CORS-preflight flag being set is cached.
